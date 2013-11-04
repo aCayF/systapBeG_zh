@@ -15,14 +15,14 @@ Systemtap Beginners Guide中文翻译版
 
 **Don Domingo**
 
-+ [ddomingo@redhat.com]
++ [ddomingo@redhat.com](ddomingo@redhat.com)
 
 **William Cohen**
 
-+ [wcohen@redhat.com]
++ [wcohen@redhat.com](wcohen@redhat.com)
 
 ## 译者
 
 **@aCayF**
 
-+ [http://weibo.com/acayf]
++ [http://weibo.com/u/1774660955](http://weibo.com/u/1774660955)
