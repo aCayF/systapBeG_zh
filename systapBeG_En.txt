@@ -1,0 +1,860 @@
+Using SystemTap
+This chapter instructs users how to install SystemTap, and provides an introduction on how to run SystemTap scripts.
+2.1. Installation and Setup
+To deploy SystemTap, you need to install the SystemTap packages along with the corresponding set
+of -devel, -debuginfo and -debuginfo-common packages for your kernel. If your system has multiple kernels installed, and you wish to use SystemTap on more than one kernel kernel, you will need to install the -devel and -debuginfo packages for each of those kernel versions.
+These procedures will be discussed in detail in the following sections.
+//Important
+Many users confuse -debuginfo with -debug. Remember that the deployment of SystemTap requires the installation of the -debuginfo package of the kernel, not the -debug version of the kernel.
+2.1.1. Installing SystemTap
+To deploy Systemtap, you will need to to install the following RPMs:
+• systemtap
+• systemtap-runtime
+Assuming that yum is installed in the system, these two rpms can be installed with yum install systemtap systemtap-runtime. Note that before you can use SystemTap, you will still need to install the required kernel information RPMs.
+2.1.2. Installing Required Kernel Information RPMs
+SystemTap needs information about the kernel in order to place instrumentation in it (i.e. probe it).
+This information also allows SystemTap to generate the code for the instrumentation. This information is contained in the matching -devel, -debuginfo, and -debuginfo-common packages for your kernel. The necessary -devel and -debuginfo packages for the ordinary "vanilla" kernel are as follows:
+• kernel-debuginfo
+• kernel-debuginfo-common
+• kernel-devel
+Likewise, the necessary packages for the PAE kernel would be kernel-PAE-debuginfo, kernel-
+PAE-debuginfo-common, and kernel-PAE-devel.
+To determine what kernel your system is currently using, use:
+uname -r
+For example, if you wish to use SystemTap on kernel version 2.6.18-53.el5 on an i686 machine, then you would need to download and install the following RPMs:
+• kernel-debuginfo-2.6.18-53.1.13.el5.i686.rpm
+• kernel-debuginfo-common-2.6.18-53.1.13.el5.i686.rpm
+• kernel-devel-2.6.18-53.1.13.el5.i686.rpm
+Important
+The version, variant, and architecture of the -devel, -debuginfo and -debuginfo-common packages must match the kernel you wish to probe with SystemTap exactly.
+The easiest way to install the required kernel information packages is through yum install and debuginfo-install commands. debuginfo-install is included with later versions of the yum- utils package (for example, version 1.1.10), and also requires an appropriate yum repository from which to download and install -debuginfo/-debuginfo-common packages. You can install the required -devel, -debuginfo, and -debuginfo-common packages for your kernel.
+With the appropriate software repositories are enabled, install the corresponding packages for a specific kernel using yum with the following commands:
+• yum install kernelname-devel-version
+• debuginfo-install kernelname-version
+Replace kernelname with the appropriate kernel variant name (for example, kernel-PAE), and version with the target kernel's version. For example, to install the required kernel information packages for the kernel-PAE-2.6.18-53.1.13.el5 kernel, run:
+• yum install kernel-PAE-devel-2.6.18-53.1.13.el5
+• debuginfo-install kernel-PAE-2.6.18-53.1.13.el5
+Once you have manually downloaded the required packages to the machine, install the RPMs by running rpm --force -ivh package_names.
+2.1.3. Initial Testing
+If you are currently using the kernel you wish to probe with SystemTap, you can immediately test whether the deployment was successful. If not, you will need to reboot and load the appropriate kernel.
+To start the test, run the command stap -v -e 'probe vfs.read {printf("read performed\n"); exit()}'. This command simply instructs SystemTap to print read performed then exit properly once a virtual file system read is detected. If the SystemTap deployment was successful, you should get output similar to the following:
+Pass 1: parsed user script and 45 library script(s) in 340usr/0sys/358real ms.
+Pass 2: analyzed script: 1 probe(s), 1 function(s), 0 embed(s), 0 global(s) in 290usr/260sys/568real ms.
+Pass 3: translated to C into "/tmp/stapiArgLX/stap_e5886fa50499994e6a87aacdc43cd392_399.c" in
+490usr/430sys/938real ms.
+Pass 4: compiled C into "stap_e5886fa50499994e6a87aacdc43cd392_399.ko" in 3310usr/430sys/3714real ms.
+Pass 5: starting run.
+read performed
+Pass 5: run completed in 10usr/40sys/73real ms.
+The last three lines of the output (i.e. beginning with Pass 5) indicate that SystemTap was able to successfully create the instrumentation to probe the kernel, run the instrumentation, detect the event being probed (in this case, a virtual file system read), and execute a valid handler (print text then close
+it with no errors).
+2.2. Generating Instrumentation for Other Computers
+When users run a SystemTap script, SystemTap builds a kernel module out of that script. SystemTap then loads the module into the kernel, allowing it to extract the specified data directly from the kernel
+(refer to Procedure 3.1, “SystemTap Session” in Section 3.1, “Architecture” for more information).
+Normally, however, SystemTap scripts can only be run on systems where SystemTap is deployed (as in Section 2.1, “Installation and Setup”). This could mean that if you want to run SystemTap on ten systems, you would need to deploy SystemTap on all those systems. In some cases, this may be neither feasible nor desired. For instance, corporate policy may prohibit an administrator from installing RPMs that provide compilers or debug information on specific machines, which will prevent the deployment of SystemTap.
+To work around this, you can resort to cross-instrumentation. Cross-instrumentation is the process of
+generating SystemTap instrumentation module from a SystemTap script on one computer to be used
+on another computer. This process offers the following benefits:
+• The kernel information packages for various machines can be installed on a single host machine.
+• Each target machine only needs one RPM to be installed to use the generated SystemTap
+instrumentation module: systemtap-runtime.
+Note
+For the sake of simplicity, we will be using the following terms throughout this section:
+• instrumentation module — the kernel module built from a SystemTap script; i.e. the SystemTap module is built on the host system, and will be loaded on the target kernel of target system.
+• host system — the system on which you compile the instrumentation modules (from SystemTap scripts), to be loaded on target systems.
+• target system — the system for which you are building the instrumentation module (from SystemTap scripts).
+• target kernel — the kernel of the target system. This is the kernel on which you wish to load/ run the instrumentation module.
+Procedure 2.1. Configuring a Host System and Target Systems
+1. Install the systemtap-runtime RPM on each target system.
+2. Determine the kernel running on each target system by running uname -r on each target system.
+3. Install SystemTap on the host system. You will be building the instrumentation module for the target systems on the host system. For instructions on how to install SystemTap, refer to Section 2.1.1, “Installing SystemTap”.
+4. Using the target kernel version determined earlier, install the target kernel and related RPMs on the host system by the method described in Section 2.1.2, “Installing Required Kernel Information RPMs”. If multiple target systems use different target kernels, you will need to repeat this step for each different kernel used on the target systems.
+After performing Procedure 2.1, “Configuring a Host System and Target Systems”, you can now build
+the instrumentation module (for any target system) on the host system.
+To build the instrumentation module, run the following command on the host system (be sure to specify the appropriate values):
+stap -r kernel_version script -m module_name
+Here, kernel_version refers to the version of the target kernel (the output of uname -r on the target machine), script refers to the script to be converted into an instrumentation module, and module_name is the desired name of the instrumentation module.
+Note
+To determine the architecture notation of a running kernel, run uname -m.
+Once the the instrumentation module is compiled, copy it to the target system and then load it using:
+staprun module_name.ko
+For example, to create the instrumentation module simple.ko from a SystemTap script named simple.stp for the target kernel 2.6.18-92.1.10.el5 (on x86_64 architecture), use the following command:
+stap -r 2.6.18-92.1.10.el5 -e 'probe vfs.read {exit()}' -m simple
+This will create a module named simple.ko. To use the instrumentation module simple.ko, copy it
+to the target system and run the following command (on the target system):
+staprun simple.ko
+Important
+The host system must be the same architecture and running the same distribution of Linux as the target system in order for the built instrumentation module to work.
+2.3. Running SystemTap Scripts
+SystemTap scripts are run through the command stap. stap can run SystemTap scripts from standard input or from file.
+Running stap and staprun requires elevated privileges to the system. However, not all users can be granted root access just to run SystemTap. In some cases, for instance, you may want to allow a non-
+privileged user to run SystemTap instrumentation on his machine.
+To allow ordinary users to run SystemTap without root access, add them to one of these user groups:
+stapdev
+Members of this group can use stap to run SystemTap scripts, or staprun to run SystemTap instrumentation modules.
+Running stap involves compiling SystemTap scripts into kernel modules and loading them into the kernel. This requires elevated privileges to the system, which are granted to stapdev members. Unfortunately, such privileges also grant effective root access to stapdev members. As such, you should only grant stapdev group membership to users whom you can trust root access.
+stapusr
+Members of this group can only run staprun to run SystemTap instrumentation modules. In addition, they can only run those modules from /lib/modules/kernel_version/ systemtap/. Note that this directory must be owned only by the root user, and must only be writable by the root user.
+Below is a list of commonly used stap options:
+-v
+Makes the output of the SystemTap session more verbose. You can repeat this option (for example, stap -vvv script.stp) to provide more details on the script's execution. This option is particularly useful if you encounter any errors in running the script.
+For more information about common SystemTap script errors, refer to Chapter 6, Understanding SystemTap Errors.
+-o filename
+Sends the standard output to file (filename).
+-S size,count
+Limit files to size megabytes and limit the the number of files kept around to count. The file names will have a sequence number suffix. This option implements logrotate operations for SystemTap.
+-x process ID
+Sets the SystemTap handler function target() to the specified process ID. For more information about target(), refer to SystemTap Functions.
+-c 'command'
+Sets the SystemTap handler function target() to the specified command and runs the SystemTap instrumentation for the duration of the specified command. For more information about target(), refer to SystemTap Functions.
+-e 'script'
+Use script string rather than a file as input for systemtap translator.
+-F
+Use SystemTap's Flight recorder mode and make the script a background process. For more information about flight recorder mode, refer to Section 2.3.1, “SystemTap Flight Recorder Mode”.
+You can also instruct stap to run scripts from standard input using the switch -. To illustrate:
+Example 2.1. Running Scripts From Standard Input
+echo "probe timer.s(1) {exit()}" | stap -
+Example 2.1, “Running Scripts From Standard Input” instructs stap to run the script passed by echo to standard input. Any stap options you wish to use should be inserted before the - switch; for instance, to make the example in Example 2.1, “Running Scripts From Standard Input” more verbose, the command would be:
+echo "probe timer.s(1) {exit()}" | stap -v -
+For more information about stap, refer to man stap.
+To run SystemTap instrumentation (i.e. the kernel module built from SystemTap scripts during a
+cross-instrumentation), use staprun instead. For more information about staprun and cross-nstrumentation, refer to Section 2.2, “Generating Instrumentation for Other Computers”.
+Note
+The stap options -v and -o also work for staprun. For more information about staprun, refer to man staprun.
+2.3.1. SystemTap Flight Recorder Mode
+SystemTap's flight recorder mode allows you to run a SystemTap script run for long periods and just
+focus on recent output. The flight recorder mode (the -F option) limits the amount of output generated.
+There are two variations of the flight recorder mode: in-memory and file mode. In both cases the SystemTap script runs as a background process.
+2.3.1.1. In-memory Flight Recorder
+When flight recorder mode (the -F option) is used without a file name SystemTap uses a buffer in
+kernel memory to store the output of the script. The SystemTap instrumentation module will load and
+the probes start running, the instrumentation will then detach and be put in the background. When
+the interesting event occurs, you can reattach to the instrumentation and see the recent output in
+the memory buffer and any continuing output. The following command starts a script using the flight
+recorder in-memory mode:
+stap -F iotime.stp
+Once the script starts, you will see a message like the following that provides the command to reconnect to the running script:
+Disconnecting from systemtap module.
+To reconnect, type "staprun -A stap_5dd0073edcb1f13f7565d8c343063e68_19556"
+When the interesting event occurs, you reattach to the currently running script and output the recent
+data in the memory buffer and get continuing output with the following command:
+staprun -A stap_5dd0073edcb1f13f7565d8c343063e68_19556
+By default the kernel buffer is 1MB in size and it can be increased with the -s option specifying the
+size in megabytes (rounded up to the next power over 2) for the buffer. For example -s2 on the
+SystemTap command line would specify 2MB for the buffer.
+2.3.1.2. File Flight Recorder
+The flight recorder mode can also store data to files. The number and size of the files kept is controlled
+by the -S option followed by two numerical arguments separated by a comma. The first argument is
+the maximum size in megabytes for the each output file. The second argument is the number of recent
+files to keep. The file name is specified by the -o option followed by the name. SystemTap will add a
+number suffix to the file name to indicate the order of the files. The following will start SystemTap in file
+flight recorder mode with the output going to files named /tmp/iotime.log.[0-9]+ and each file 1MB or smaller and keeping latest two files:
+stap -F -o /tmp/pfaults.log -S 1,2
+pfaults.stp
+The number printed by the command is the process ID. Sending a SIGTERM to the process will shutdown the SystemTap script and stop the data collection. For example if the previous command
+listed the 7590 as the process ID, the following command whould shutdown the systemtap script:
+kill -s SIGTERM 7590
+Only the most recent two file generated by the script are kept and the older files are been removed.
+Thus, ls -sh /tmp/pfaults.log.* shows the only two files:
+1020K /tmp/pfaults.log.5
+44K /tmp/pfaults.log.6
+One can look at the highest number file for the latest data, in this case /tmp/pfaults.log.6.
+Understanding How SystemTap Works
+SystemTap allows users to write and reuse simple scripts to deeply examine the activities of a running
+Linux system. These scripts can be designed to extract data, filter it, and summarize it quickly (and
+safely), enabling the diagnosis of complex performance (or even functional) problems.
+The essential idea behind a SystemTap script is to name events, and to give them handlers. When
+SystemTap runs the script, SystemTap monitors for the event; once the event occurs, the Linux kernel
+then runs the handler as a quick sub-routine, then resumes.
+There are several kind of events; entering/exiting a function, timer expiration, session termination, etc.
+A handler is a series of script language statements that specify the work to be done whenever the
+event occurs. This work normally includes extracting data from the event context, storing them into
+internal variables, and printing results.
+3.1. Architecture
+A SystemTap session begins when you run a SystemTap script. This session occurs in the following
+fashion:
+Procedure 3.1. SystemTap Session
+1. First, SystemTap checks the script against the existing tapset library (normally in /usr/share/systemtap/tapset/ for any tapsets used. SystemTap will then substitute any located tapsets with their corresponding definitions in the tapset library.
+2. SystemTap then translates the script to C, running the system C compiler to create a kernel module from it. The tools that perform this step are contained in the systemtap package (refer to Section 2.1.1, “Installing SystemTap” for more information).
+3. SystemTap loads the module, then enables all the probes (events and handlers) in the script. The
+staprun in the systemtap-runtime package (refer to Section 2.1.1, “Installing SystemTap” for more information) provides this functionality.
+4. As the events occur, their corresponding handlers are executed.
+5. Once the SystemTap session is terminated, the probes are disabled, and the kernel module is unloaded.
+This sequence is driven from a single command-line program: stap. This program is SystemTap's
+main front-end tool. For more information about stap, refer to man stap (once SystemTap is
+properly installed on your machine).
+3.2. SystemTap Scripts
+For the most part, SystemTap scripts are the foundation of each SystemTap session. SystemTap scripts instruct SystemTap on what type of information to collect, and what to do once that information is collected.
+As stated in Chapter 3, Understanding How SystemTap Works, SystemTap scripts are made up of two
+components: events and handlers. Once a SystemTap session is underway, SystemTap monitors the
+operating system for the specified events and executes the handlers as they occur.
+Note
+An event and its corresponding handler is collectively called a probe. A SystemTap script can have multiple probes.
+A probe's handler is commonly referred to as a probe body.
+In terms of application development, using events and handlers is similar to instrumenting the code by
+inserting diagnostic print statements in a program's sequence of commands. These diagnostic print
+statements allow you to view a history of commands executed once the program is run.
+SystemTap scripts allow insertion of the instrumentation code without recompilation of the code
+and allows more flexibility with regard to handlers. Events serve as the triggers for handlers to run;
+handlers can be specified to record specified data and print it in a certain manner.
+Format
+SystemTap scripts use the file extension .stp, and contains probes written in the following format:
+probe event {statements}
+SystemTap supports multiple events per probe; multiple events are delimited by a comma (,). If multiple events are specified in a single probe, SystemTap will execute the handler when any of the
+specified events occur.
+Each probe has a corresponding statement block. This statement block is enclosed in braces ({ })
+and contains the statements to be executed per event. SystemTap executes these statements in
+sequence; special separators or terminators are generally not necessary between multiple statements.
+Note
+Statement blocks in SystemTap scripts follow the same syntax and semantics as the C programming language. A statement block can be nested within another statement block.
+Systemtap allows you to write functions to factor out code to be used by a number of probes. Thus,
+rather than repeatedly writing the same series of statements in multiple probes, you can just place the
+instructions in a function, as in:
+function function_name(arguments) {statements}
+probe event {function_name(arguments)}
+The statements in function_name are executed when the probe for event executes. The arguments are optional values passed into the function.
+Important
+Section 3.2, “SystemTap Scripts” is designed to introduce readers to the basics of SystemTap scripts. To understand SystemTap scripts better, it is advisable that you refer to Chapter 5, Useful SystemTap Scripts; each section therein provides a detailed explanation of the script, its events, handlers, and expected output.
+3.2.1. Event
+SystemTap events can be broadly classified into two types: synchronous and asynchronous.
+Synchronous Events
+A synchronous event occurs when any process executes an instruction at a particular location in kernel code. This gives other events a reference point from which more contextual data may be available.
+Examples of synchronous events include:
+syscall.system_call
+The entry to the system call system_call. If the exit from a syscall is desired, appending a .return to the event monitor the exit of the system call instead. For example, to specify the entry and exit of the system call close, use syscall.close and syscall.close.return respectively.
+vfs.file_operation
+The entry to the file_operation event for Virtual File System (VFS). Similar to syscall event, appending a .return to the event monitors the exit of the file_operation operation.
+kernel.function("function")
+The entry to the kernel function function. For example, kernel.function("sys_open") refers to the "event" that occurs when the kernel function sys_open is called by any thread in the system. To specify the return of the kernel function sys_open, append the return string to the event statement; i.e. kernel.function("sys_open").return.
+When defining probe events, you can use asterisk (*) for wildcards. You can also trace the entry or exit of a function in a kernel source file. Consider the following example:
+Example 3.1. wildcards.stp
+probe kernel.function("*@net/socket.c") { }
+probe kernel.function("*@net/socket.c").return { }
+In the previous example, the first probe's event specifies the entry of ALL functions in the kernel source file net/socket.c. The second probe specifies the exit of all those functions. Note that in this example, there are no statements in the handler; as such, no information will be collected or displayed.
+kernel.trace("tracepoint")
+The static probe for tracepoint. Recent kernels (2.6.30 and newer) include instrumentation for specific events in the kernel. These events are statically marked with tracepoints. One example of a tracepoint available in systemtap is kernel.trace("kfree_skb") which indicates each time a network buffer is freed in the kernel.
+module("module").function("function")
+Allows you to probe functions within modules. For example:
+Example 3.2. moduleprobe.stp
+probe module("ext3").function("*") { }
+probe module("ext3").function("*").return { }
+The first probe in Example 3.2, “moduleprobe.stp” points to the entry of all functions for the ext3 module. The second probe points to the exits of all functions for that same module; the use of the .return suffix is similar to kernel.function(). Note that the probes in Example 3.2, “moduleprobe.stp” do not contain statements in the probe handlers, and as such will not print any useful data (as in Example 3.1, “wildcards.stp”).
+A system's kernel modules are typically located in /lib/modules/kernel_version, where kernel_version refers to the currently loaded kernel version. Modules use the file name extension .ko.
+Asynchronous Events
+Asynchronous events are not tied to a particular instruction or location in code. This family of probe
+points consists mainly of counters, timers, and similar constructs.
+Examples of asynchronous events include:
+begin
+The startup of a SystemTap session; i.e. as soon as the SystemTap script is run.
+end
+The end of a SystemTap session.
+timer events
+An event that specifies a handler to be executed periodically. For example:
+Example 3.3. timer-s.stp
+probe timer.s(4)
+{
+printf("hello world\n")
+}
+Example 3.3, “timer-s.stp” is an example of a probe that prints hello world every 4 seconds. Note that you can also use the following timer events:
+• timer.ms(milliseconds)
+• timer.us(microseconds)
+• timer.ns(nanoseconds)
+• timer.hz(hertz)
+• timer.jiffies(jiffies)
+When used in conjunction with other probes that collect information, timer events allows you to print out get periodic updates and see how that information changes over time.
+Important
+SystemTap supports the use of a large collection of probe events. For more information about supported events, refer to man stapprobes. The SEE ALSO section of man stapprobes also contains links to other man pages that discuss supported events for specific subsystems and components.
+3.2.2. Systemtap Handler/Body
+Consider the following sample script:
+Example 3.4. helloworld.stp
+probe begin
+{
+printf ("hello world\n")
+exit ()
+}
+In Example 3.4, “helloworld.stp”, the event begin (i.e. the start of the session) triggers the handler
+enclosed in { }, which simply prints hello world followed by a new-line, then exits.
+Note
+SystemTap scripts continue to run until the exit() function executes. If the users wants to stop the execution of the script, it can interrupted manually with Ctrl+C
+printf ( ) Statements
+The printf () statement is one of the simplest functions for printing data. printf () can also be used to display data using a wide variety of SystemTap functions in the following format:
+printf ("format string\n", arguments)
+The format string specifies how arguments should be printed. The format string of Example 3.4,
+“helloworld.stp” simply instructs SystemTap to print hello world, and contains no format specifiers.
+You can use the format specifiers %s (for strings) and %d (for numbers) in format strings, depending
+on your list of arguments. Format strings can have multiple format specifiers, each matching a
+corresponding argument; multiple arguments are delimited by a comma (,).
+Note
+Semantically, the SystemTap printf function is very similar to its C language counterpart. The aforementioned syntax and format for SystemTap's printf function is identical to that of the C- style printf.
+To illustrate this, consider the following probe example:
+Example 3.5. variables-in-printf-statements.stp
+probe syscall.open
+{
+printf ("%s(%d) open\n", execname(), pid())
+}
+Example 3.5, “variables-in-printf-statements.stp” instructs SystemTap to probe all entries to the system
+call open; for each event, it prints the current execname() (a string with the executable name) and pid() (the current process ID number), followed by the word open. A snippet of this probe's output would look like:
+vmware-guestd(2206) open
+hald(2360) open
+hald(2360) open
+hald(2360) open
+df(3433) open
+df(3433) open
+df(3433) open
+hald(2360) open
+SystemTap Functions
+SystemTap supports a wide variety of functions that can be used as printf () arguments. Example 3.5, “variables-in-printf-statements.stp” uses the SystemTap functions execname() (name of the process that called a kernel function/performed a system call) and pid() (current process ID). The following is a list of commonly-used SystemTap functions:
+tid()
+The ID of the current thread.
+uid()
+The ID of the current user.
+cpu()
+The current CPU number.
+gettimeofday_s()
+The number of seconds since UNIX epoch (January 1, 1970).
+ctime()
+Convert number of seconds since UNIX epoch to date.
+pp()
+A string describing the probe point currently being handled.
+thread_indent()
+This particular function is quite useful, providing you with a way to better organize your print results. The function takes one argument, an indentation delta, which indicates how many spaces to add or remove from a thread's "indentation counter". It then returns a string with some generic trace data along with an appropriate number of indentation spaces.
+The generic data included in the returned string includes a timestamp (number of microseconds since the first call to thread_indent() by the thread), a process name, and the thread ID. This allows you to identify what functions were called, who called them, and the duration of each function call.
+If call entries and exits immediately precede each other, it is easy to match them. However, in most cases, after a first function call entry is made several other call entries and exits may be made before the first call exits. The indentation counter helps you match an entry with its corresponding exit by indenting the next function call if it is not the exit of the previous one.
+Consider the following example on the use of thread_indent():
+Example 3.6. thread_indent.stp
+probe kernel.function("*@net/socket.c").call
+{
+printf ("%s -> %s\n", thread_indent(1), probefunc())
+}
+probe kernel.function("*@net/socket.c").return
+{
+printf ("%s <- %s\n", thread_indent(-1), probefunc())
+}
+Example 3.6, “thread_indent.stp” prints out the thread_indent() and probe functions at each event in the following format:
+0 ftp(7223): -> sys_socketcall
+1159 ftp(7223): -> sys_socket
+2173 ftp(7223):
+-> __sock_create
+2286 ftp(7223):
+-> sock_alloc_inode
+2737 ftp(7223):
+<- sock_alloc_inode
+3349 ftp(7223):
+-> sock_alloc
+3389 ftp(7223):
+<- sock_alloc
+3417 ftp(7223):
+<- __sock_create
+4117 ftp(7223):
+-> sock_create
+4160 ftp(7223):
+<- sock_create
+4301 ftp(7223):
+-> sock_map_fd
+4644 ftp(7223):
+-> sock_map_file
+4699 ftp(7223):
+<- sock_map_file
+4715 ftp(7223):
+<- sock_map_fd
+4732 ftp(7223): <- sys_socket
+4775 ftp(7223): <- sys_socketcall
+This sample output contains the following information:
+• The time (in microseconds) since the initial thread_indent() call for the thread (included in the string from thread_indent()).
+• The process name (and its corresponding ID) that made the function call (included in the string from thread_indent()).
+• An arrow signifying whether the call was an entry (<-) or an exit (->); the indentations help you match specific function call entries with their corresponding exits.
+• The name of the function called by the process.
+name
+Identifies the name of a specific system call. This variable can only be used in probes that use the event syscall.system_call.
+target()
+Used in conjunction with stap script -x process ID or stap script -c command. If you want to specify a script to take an argument of a process ID or command, use target() as the variable in the script to refer to it. For example:
+Example 3.7. targetexample.stp
+probe syscall.* {
+if (pid() == target())
+printf("%s/n", name)
+}
+When Example 3.7, “targetexample.stp” is run with the argument -x process ID, it watches all system calls (as specified by the event syscall.*) and prints out the name of all system calls made by the specified process.
+This has the same effect as specifying if (pid() == process ID) each time you wish to target a specific process. However, using target() makes it easier for you to re-use the script, giving you the ability to simply pass a process ID as an argument each time you wish to run the script (e.g. stap targetexample.stp -x process ID). For more information about supported SystemTap functions, refer to man stapfuncs.
+3.3. Basic SystemTap Handler Constructs
+SystemTap supports the use of several basic constructs in handlers. The syntax for most of these
+handler constructs are mostly based on C and awk syntax. This section describes several of the most
+useful SystemTap handler constructs, which should provide you with enough information to write simple yet useful SystemTap scripts.
+3.3.1. Variables
+Variables can be used freely throughout a handler; simply choose a name, assign a value from a function or expression to it, and use it in an expression. SystemTap automatically identifies whether a variable should be typed as a string or integer, based on the type of the values assigned to it. For instance, if you use set the variable foo to gettimeofday_s() (as in foo = gettimeofday_s()), then foo is typed as a number and can be printed in a printf() with the integer format specifier (%d).
+Note, however, that by default variables are only local to the probe they are used in. This means that
+variables are initialized, used and disposed at each probe handler invocation. To share a variable
+between probes, declare the variable name using global outside of the probes. Consider the following example:
+Example 3.8. timer-jiffies.stp
+global count_jiffies, count_ms
+probe timer.jiffies(100) { count_jiffies ++ }
+probe timer.ms(100) { count_ms ++ }
+probe timer.ms(12345)
+{
+hz=(1000*count_jiffies) / count_ms
+printf ("jiffies:ms ratio %d:%d => CONFIG_HZ=%d\n",
+count_jiffies, count_ms, hz)
+exit ()
+}
+Example 3.8, “timer-jiffies.stp” computes the CONFIG_HZ setting of the kernel using timers that count jiffies and milliseconds, then computing accordingly. The global statement allows the script to use the variables count_jiffies and count_ms (set in their own respective probes) to be shared with
+probe timer.ms(12345).
+Note
+The ++ notation in Example 3.8, “timer-jiffies.stp” (i.e. count_jiffies ++ and count_ms + +) is used to increment the value of a variable by 1. In the following probe, count_jiffies is incremented by 1 every 100 jiffies:
+probe timer.jiffies(100) { count_jiffies ++ }
+In this instance, SystemTap understands that count_jiffies is an integer. Because no initial value was assigned to count_jiffies, its initial value is zero by default.
+3.3.2. Target Variables
+The probe events that map to actual locations in the code (for example kernel.function("function") and kernel.statement("statement")) allow the use of target variables to obtain the value of variables visible at that location in the code. You can use the - L option to list the target variable available at a probe point. If the debug information is installed for the running kernel, you can run the following command to find out what target variables are available for the vfs_read function:
+stap -L 'kernel.function("vfs_read")'
+This will yield something similar to the following:
+kernel.function("vfs_read@fs/read_write.c:277") $file:struct file* $buf:char* $count:size_t
+$pos:loff_t*
+Each target variable is proceeded by a “$” and the type of the target variable follows the “:”. The
+kernel's vfs_read function has $file (pointer to structure describing the file), $buf (pointer to the user-space memory to store the read data), $count (number of bytes to read), and $pos (position to start reading from in the file) target variables at the entry to the function.
+When a target variable is not local to the probe point, like a global external variable or a file local static
+variable defined in another file then it can be referenced through “@var("varname@src/file.c")”.
+SystemTap tracks the typing information of the target variable and can examine the fields of a structure with the -> operator. The -> operator can be chained to look at data structures contained within data structures and follow pointers to other data structures. The -> operator will obtain the value in the field of the structure. The -> operator is used regardless whether accessing a field in a substructure or accessing another structure through a pointer.
+For example to access a field of the static files_stat target variable defined in fs/file_table.c (which
+holds some of the current file system sysctl tunables), one could write:
+stap -e 'probe kernel.function("vfs_read") {
+printf ("current files_stat max_files: %d\n",
+@var("files_stat@fs/file_table.c")->max_files);
+exit(); }'
+Which will yield something similar to the following:
+current files_stat max_files: 386070
+For pointers to base types such as integers and strings there are a number of functions listed below to
+access kernel-space data. The first argument for each functions is the pointer to the data item. Similar
+functions are described in Section 4.2, “Accessing User-Space Target Variables” for accessing target
+variables in user-space code.
+kernel_char(address)
+Obtain the character at address from kernel memory.
+kernel_short(address)
+Obtain the short at address from kernel memory.
+kernel_int(address)
+Obtain the int at address from kernel memory.
+kernel_long(address)
+Obtain the long at address from kernel memory
+kernel_string(address)
+Obtain the string at address from kernel memory.
+kernel_string_n(address, n)
+Obtain the string at address from the kernel memory and limits the string to n bytes.
+3.3.2.1. Pretty Printing Target Variables
+SystemTap scripts are often used to observe what is happening within the code. In many cases just printing the values of the various context variables is sufficient. SystemTap makes a number operations available that can generate printable strings for target variables:
+$$vars
+Expands to a character string that is equivalent to sprintf("parm1=%x ... parmN=%x var1=%x ... varN=%x", parm1, ..., parmN, var1, ..., varN) for each variable in scope at the probe point. Some values may be printed as “=?” if their run-time location cannot be found.
+$$locals
+Expands to a subset of $$vars containing only the local variables.
+$$parms
+Expands to a subset of $$vars containing only the function parameters.
+$$return
+Is available in return probes only. It expands to a string that is equivalent to sprintf("return= %x", $return) if the probed function has a return value, or else an empty string. Below is a command-line script that prints the values of the parameters passed into the function vfs_read:
+stap -e 'probe kernel.function("vfs_read") {printf("%s\n", $$parms); exit(); }'
+There are four parameters passed into vfs_read: file, buf, count, and pos. The $$parms generates a string for the parameters passed into the function. In this case all but the count parameter are pointers. The following is an example of the output from the previous command-line
+script:
+file=0xffff8800b40d4c80 buf=0x7fff634403e0 count=0x2004 pos=0xffff8800af96df48
+Having the address a pointer points to may not be useful. You might be more interested in the fields of
+the data structure the pointer points to. You can use the the “$” suffix to pretty print the data structure.
+The following command-line example uses the pretty printing suffix to print more details about the data
+structures passed into the function vfs_read:
+stap -e 'probe kernel.function("vfs_read") {printf("%s\n", $$parms$); exit(); }'
+The previous command line will generate something similar to the following with the fields of the data
+structure included in the output:
+file={.f_u={...}, .f_path={...}, .f_op=0xffffffffa06e1d80, .f_lock={...}, .f_count={...}, .f_flags=34818, .f_mod
+buf="" count=8196 pos=-131938753921208
+With the “$” suffix fields that are composed of data structures are not expanded. The “$$” suffix will
+print the values contained within the nested data structures. Below is an example using the “$$” suffix:
+stap -e 'probe kernel.function("vfs_read") {printf("%s\n", $$parms$$); exit(); }'
+The “$$” suffix, like all strings, is limited to the maximum string size. Below is a represenative output
+from the previous command-line script, which is truncated because of the string size limit:
+file={.f_u={.fu_list={.next=0xffff8801336ca0e8, .prev=0xffff88012ded0840}, .fu_rcuhead={.next=0xffff8801336ca0e8
+3.3.2.2. Typecasting
+In most cases SystemTap can determine a variable's type from the debug information. However, code
+may use void pointers for variables (for example memory allocation routines) and typing information
+is not available. Also the typing information available within a probe handler is not available within a
+function; SystemTap functions arguments use a long in place of a typed pointer. SystemTap's @cast
+operator (first available in SystemTap 0.9) can be used to indicate the correct type of the object. The Example 3.9, “Casting Example” is from the task.stp tapset. The function returns the value of the state field from a task_struct pointed to by the long task. The first argument of the @cast operator, task, is the pointer to the object. The second argument is the type to cast the object to, task_struct. The third arument lists what file that the type definition information comes from and is optional. With the @cast operator the various fields of this particular task_struct task can be accessed; in this example the state field is obtained.
+Example 3.9. Casting Example
+function task_state:long (task:long)
+{
+return @cast(task, "task_struct", "kernel<linux/sched.h>")->state
+}
+3.3.2.3. Checking Target Variable Availablility
+As code evolves the target variables available may change. The @defined makes it easier to handle
+those variations in the available target variables. The @defined provides a test to see if a particular
+target variable is available. The result of this test can be used to select the appropriate expression.
+The Example 3.10, “Testing target variable available Example” from the memory.stp tapset provides
+an probe event alias. Some version of the kernel functions being probed have an argument $flags.
+When available, the $flags argument is used to generate the local variable write_access. The versions of the probed functions that do not have the $flags argument have a $write argument and that is used instead for the local variable write_access.
+Example 3.10. Testing target variable available Example
+probe vm.pagefault = kernel.function("__handle_mm_fault@mm/memory.c") ?,
+kernel.function("handle_mm_fault@mm/memory.c") ?
+{
+name = "pagefault"
+write_access = (@defined($flags)
+? $flags & FAULT_FLAG_WRITE : $write_access)
+address = $address
+}
+3.3.3. Conditional Statements
+In some cases, the output of a SystemTap script may be too big. To address this, you need to further
+refine the script's logic in order to delimit the output into something more relevant or useful to your
+probe.
+You can do this by using conditionals in handlers. SystemTap accepts the following types of conditional statements:
+If/Else Statements
+Format:
+if (condition)
+statement1
+else
+statement2
+The statement1 is executed if the condition expression is non-zero. The statement2 is executed if the condition expression is zero. The else clause (else statement2) is optional. Both statement1 and statement2 can be statement blocks.
+Example 3.11. ifelse.stp
+global countread, countnonread
+probe kernel.function("vfs_read"),kernel.function("vfs_write")
+{
+if (probefunc()=="vfs_read")
+countread ++
+else
+countnonread ++
+}
+probe timer.s(5) { exit() }
+probe end
+{
+printf("VFS reads total %d\n VFS writes total %d\n", countread, countnonread)
+}
+Example 3.11, “ifelse.stp” is a script that counts how many virtual file system reads (vfs_read) and writes (vfs_write) the system performs within a 5-second span. When run, the script increments the value of the variable countread by 1 if the name of the function it probed matches vfs_read (as noted by the condition if (probefunc()=="vfs_read")); otherwise, it increments countnonread (else {countnonread ++}).
+While Loops
+Format:
+while (condition)
+statement
+So long as condition is non-zero the block of statements in statement are executed. The statement is often a statement block and it must change a value so condition will eventually be zero.
+For Loops
+Format:
+for (initialization; conditional; increment) statement
+The for loop is simply shorthand for a while loop. The following is the equivalent while loop:
+initialization
+while (conditional) {
+statement
+increment
+}
+Conditional Operators
+Aside from == ("is equal to"), you can also use the following operators in your conditional statements:
+>=
+Greater than or equal to
+<=
+Less than or equal to
+!=
+Is not equal to
+3.3.4. Command-Line Arguments
+You can also allow a SystemTap script to accept simple command-line arguments using a $ or @
+immediately followed by the number of the argument on the command line. Use $ if you are expecting
+the user to enter an integer as a command-line argument, and @ if you are expecting a string.
+Example 3.12. commandlineargs.stp
+probe kernel.function(@1) { }
+probe kernel.function(@1).return { }
+Example 3.12, “commandlineargs.stp” is similar to Example 3.1, “wildcards.stp”, except that it allows you to pass the kernel function to be probed as a command-line argument (as in stap commandlineargs.stp kernel function). You can also specify the script to accept multiple
+command-line arguments, noting them as @1, @2, and so on, in the order they are entered by the user.
+3.4. Associative Arrays
+SystemTap also supports the use of associative arrays. While an ordinary variable represents a single
+value, associative arrays can represent a collection of values. Simply put, an associative array is a
+collection of unique keys; each key in the array has a value associated with it.
+Since associative arrays are normally processed in multiple probes (as we will demonstrate later), they should be declared as global variables in the SystemTap script. The syntax for accessing an element in an associative array is similar to that of awk, and is as follows:
+array_name[index_expression]
+Here, the array_name is any arbitrary name the array uses. The index_expression is used to refer to a specific unique key in the array. To illustrate, let us try to build an array named foo that specifies the ages of three people (i.e. the unique keys): tom, dick, and harry. To assign them the ages (i.e. associated values) of 23, 24, and 25 respectively, we'd use the following array statements:
+Example 3.13. Basic Array Statements
+foo["tom"] = 23
+foo["dick"] = 24
+foo["harry"] = 25
+You can specify up to nine index expressons in an array statement, each one delimited by a comma
+(,). This is useful if you wish to have a key that contains multiple pieces of information. The following
+line from disktop.stp uses 5 elements for the key: process ID, executable name, user ID, parent process ID, and string "W". It associates the value of devname with that key.
+device[pid(),execname(),uid(),ppid(),"W"] = devname
+Important
+All associate arrays must be declared as global, regardless of whether the associate array is
+used in one or multiple probes.
+3.5. Array Operations in SystemTap
+This section enumerates some of the most commonly used array operations in SystemTap.
+3.5.1. Assigning an Associated Value
+Use = to set an associated value to indexed unique pairs, as in:
+array_name[index_expression] = value
+Example 3.13, “Basic Array Statements” shows a very basic example of how to set an explicit associated value to a unique key. You can also use a handler function as both your index_expression and value. For example, you can use arrays to set a timestamp as the associated value to a process name (which you wish to use as your unique key), as in:
+Example 3.14. Associating Timestamps to Process Names
+foo[tid()] = gettimeofday_s()
+Whenever an event invokes the statement in Example 3.14, “Associating Timestamps to Process
+Names”, SystemTap returns the appropriate tid() value (i.e. the ID of a thread, which is then used
+as the unique key). At the same time, SystemTap also uses the function gettimeofday_s() to set the corresponding timestamp as the associated value to the unique key defined by the function tid(). This creates an array composed of key pairs containing thread IDs and timestamps.
+In this same example, if tid() returns a value that is already defined in the array foo, the operator will discard the original associated value to it, and replace it with the current timestamp from gettimeofday_s().
+3.5.2. Reading Values From Arrays
+You can also read values from an array the same way you would read the value of a variable. To do
+so, include the array_name[index_expression] statement as an element in a mathematical expression. For example:
+Example 3.15. Using Array Values in Simple Computations
+delta = gettimeofday_s() - foo[tid()]
+This example assumes that the array foo was built using the construct in Example 3.14, “Associating
+Timestamps to Process Names” (from Section 3.5.1, “Assigning an Associated Value”). This sets a
+timestamp that will serve as a reference point, to be used in computing for delta.
+The construct in Example 3.15, “Using Array Values in Simple Computations” computes a value
+for the variable delta by subtracting the associated value of the key tid() from the current gettimeofday_s(). The construct does this by reading the value of tid() from the array. This particular construct is useful for determining the time between two events, such as the start and completion of a read operation.
+Note
+If the index_expression cannot find the unique key, it returns a value of 0 (for numerical operations, such as Example 3.15, “Using Array Values in Simple Computations”) or a null/empty string value (for string operations) by default.
+3.5.3. Incrementing Associated Values
+Use ++ to increment the associated value of a unique key in an array, as in:
+array_name[index_expression] ++
+Again, you can also use a handler function for your index_expression. For example, if you wanted to tally how many times a specific process performed a read to the virtual file system (using the event vfs.read), you can use the following probe:
+Example 3.16. vfsreads.stp
+probe vfs.read
+{
+reads[execname()] ++
+}
+In Example 3.16, “vfsreads.stp”, the first time that the probe returns the process name gnome- terminal (i.e. the first time gnome-terminal performs a VFS read), that process name is set as the unique key gnome-terminal with an associated value of 1. The next time that the probe returns the process name gnome-terminal, SystemTap increments the associated value of gnome- terminal by 1. SystemTap performs this operation for all process names as the probe returns them.
+3.5.4. Processing Multiple Elements in an Array
+Once you've collected enough information in an array, you will need to retrieve and process all elements in that array to make it useful. Consider Example 3.16, “vfsreads.stp”: the script collects
+information about how many VFS reads each process performs, but does not specify what to do with
+it. The obvious means for making Example 3.16, “vfsreads.stp” useful is to print the key pairs in the
+array reads, but how?
+The best way to process all key pairs in an array (as an iteration) is to use the foreach statement. Consider the following example:
+Example 3.17. cumulative-vfsreads.stp
+global reads
+probe vfs.read
+{
+reads[execname()] ++
+}
+probe timer.s(3)
+{
+foreach (count in reads)
+printf("%s : %d \n", count, reads[count])
+}
+In the second probe of Example 3.17, “cumulative-vfsreads.stp”, the foreach statement uses the variable count to reference each iteration of a unique key in the array reads. The reads[count] array statement in the same probe retrieves the associated value of each unique key.
+Given what we know about the first probe in Example 3.17, “cumulative-vfsreads.stp”, the script prints
+VFS-read statistics every 3 seconds, displaying names of processes that performed a VFS-read along
+with a corresponding VFS-read count.
+Now, remember that the foreach statement in Example 3.17, “cumulative-vfsreads.stp” prints all iterations of process names in the array, and in no particular order. You can instruct the script to process the iterations in a particular order by using + (ascending) or - (descending). In addition, you can also limit the number of iterations the script needs to process with the limit value option.
+For example, consider the following replacement probe:
+probe timer.s(3)
+{
+foreach (count in reads- limit 10)
+printf("%s : %d \n", count, reads[count])
+}
+This foreach statement instructs the script to process the elements in the array reads in descending order (of associated value). The limit 10 option instructs the foreach to only process the first ten iterations (i.e. print the first 10, starting with the highest value).
+3.5.5. Clearing/Deleting Arrays and Array Elements
+Sometimes, you may need to clear the associated values in array elements, or reset an entire array
+for re-use in another probe. Example 3.17, “cumulative-vfsreads.stp” in Section 3.5.4, “Processing
+Multiple Elements in an Array” allows you to track how the number of VFS reads per process grows
+over time, but it does not show you the number of VFS reads each process makes per 3-second period.
+To do that, you will need to clear the values accumulated by the array. You can accomplish this using the delete operator to delete elements in an array, or an entire array. Consider the following
+example:
+Example 3.18. noncumulative-vfsreads.stp
+global reads
+probe vfs.read
+{
+reads[execname()] ++
+}
+probe timer.s(3)
+{
+foreach (count in reads)
+printf("%s : %d \n", count, reads[count])
+delete reads
+}
+In Example 3.18, “noncumulative-vfsreads.stp”, the second probe prints the number of VFS reads
+each process made within the probed 3-second period only. The delete reads statement clears the reads array within the probe.
+Note
+You can have multiple array operations within the same probe. Using the examples from Section 3.5.4, “Processing Multiple Elements in an Array” and Section 3.5.5, “Clearing/Deleting Arrays and Array Elements” , you can track the number of VFS reads each process makes per 3-second period and tally the cumulative VFS reads of those same processes. Consider the following example:
+global reads, totalreads
+probe vfs.read
+{
+reads[execname()] ++
+totalreads[execname()] ++
+}
+probe timer.s(3)
+{
+printf("=======\n")
+foreach (count in reads-)
+printf("%s : %d \n", count, reads[count])
+delete reads
+}
+probe end
+{
+printf("TOTALS\n")
+foreach (total in totalreads-)
+printf("%s : %d \n", total, totalreads[total])
+}
+In this example, the arrays reads and totalreads track the same information, and are printed out in a similar fashion. The only difference here is that reads is cleared every 3-second period, whereas totalreads keeps growing.
+3.5.6. Using Arrays in Conditional Statements
+You can also use associative arrays in if statements. This is useful if you want to execute a subroutine once a value in the array matches a certain condition. Consider the following example:
+Example 3.19. vfsreads-print-if-1kb.stp
+global reads
+probe vfs.read
+{
+reads[execname()] ++
+}
+probe timer.s(3)
+{
+printf("=======\n")
+foreach (count in reads-)
+if (reads[count] >= 1024)
+printf("%s : %dkB \n", count, reads[count]/1024)
+else
+printf("%s : %dB \n", count, reads[count])
+}
+Every three seconds, Example 3.19, “vfsreads-print-if-1kb.stp” prints out a list of all processes, along
+with how many times each process performed a VFS read. If the associated value of a process name
+is equal or greater than 1024, the if statement in the script converts and prints it out in kB.
+Testing for Membership
+You can also test whether a specific unique key is a member of an array. Further, membership in an
+array can be used in if statements, as in:
+if([index_expression] in array_name) statement
+To illustrate this, consider the following example:
+Example 3.20. vfsreads-stop-on-stapio2.stp
+global reads
+probe vfs.read
+{
+reads[execname()] ++
+}
+probe timer.s(3)
+{
+printf("=======\n")
+foreach (count in reads+)
+printf("%s : %d \n", count, reads[count])
+if(["stapio"] in reads) {
+printf("stapio read detected, exiting\n")
+exit()
+}
+}
+The if(["stapio"] in reads) statement instructs the script to print stapio read detected, exiting once the unique key stapio is added to the array reads.
+3.5.7. Computing for Statistical Aggregates
+Statistical aggregates are used to collect statistics on numerical values where it is important to accumulate new data quickly and in large volume (i.e. storing only aggregated stream statistics).
+Statistical aggregates can be used in global variables or as elements in an array.
+To add value to a statistical aggregate, use the operator <<< value.
+Example 3.21. stat-aggregates.stp
+global reads
+probe vfs.read
+{
+reads[execname()] <<< count
+}
+In Example 3.21, “stat-aggregates.stp”, the operator <<< count stores the amount returned by count to to the associated value of the corresponding execname() in the reads array. Remember, these values are stored; they are not added to the associated values of each unique key, nor are they used to replace the current associated values. In a manner of speaking, think of it as having each unique key (execname()) having multiple associated values, accumulating with each probe handler run.
+Note
+In the context of Example 3.21, “stat-aggregates.stp”, count returns the amount of data read by the returned execname() to the virtual file system.
+To extract data collected by statistical aggregates, use the syntax format @extractor(variable/ array index expression). extractor can be any of the following integer extractors:
+count
+Returns the number of all values stored into the variable/array index expression. Given the sample
+probe in Example 3.21, “stat-aggregates.stp”, the expression @count(reads[execname()]) will return how many values are stored in each unique key in array reads.
+sum
+Returns the sum of all values stored into the variable/array index expression. Again, given sample
+probe in Example 3.21, “stat-aggregates.stp”, the expression @sum(reads[execname()]) will return the total of all values stored in each unique key in array reads.
+min
+Returns the smallest among all the values stored in the variable/array index expression.
+max
+Returns the largest among all the values stored in the variable/array index expression.
+avg
+Returns the average of all values stored in the variable/array index expression.
+When using statistical aggregates, you can also build array constructs that use multiple index expressions (to a maximum of 5). This is helpful in capturing additional contextual information during a probe. For example:
+Example 3.22. Multiple Array Indexes
+global reads
+probe vfs.read
+{
+reads[execname(),pid()] <<< 1
+}
+probe timer.s(3)
+{
+foreach([var1,var2] in reads)
+printf("%s (%d) : %d \n", var1, var2, @count(reads[var1,var2]))
+}
+In Example 3.22, “Multiple Array Indexes”, the first probe tracks how many times each process performs a VFS read. What makes this different from earlier examples is that this array associates a
+performed read to both a process name and its corresponding process ID.
+The second probe in Example 3.22, “Multiple Array Indexes” demonstrates how to process and print
+the information collected by the array reads. Note how the foreach statement uses the same number of variables (i.e. var1 and var2) contained in the first instance of the array reads from the first probe.
+3.6. Tapsets
+Tapsets are scripts that form a library of pre-written probes and functions to be used in SystemTap
+scripts. When a user runs a SystemTap script, SystemTap checks the script's probe events and handlers against the tapset library; SystemTap then loads the corresponding probes and functions before translating the script to C (refer to Section 3.1, “Architecture” for information on what transpires in a SystemTap session).
+Like SystemTap scripts, tapsets use the file name extension .stp. The standard library of tapsets is located in /usr/share/systemtap/tapset/ by default. However, unlike SystemTap scripts, tapsets are not meant for direct execution; rather, they constitute the library from which other scripts can pull definitions.
+Simply put, the tapset library is an abstraction layer designed to make it easier for users to define events and functions. In a manner of speaking, tapsets provide useful aliases for functions that users
+may want to specify as an event; knowing the proper alias to use is, for the most part, easier than
+remembering specific kernel functions that might vary between kernel versions.
+Several handlers and functions in Section 3.2.1, “Event” and SystemTap Functions are defined in
+tapsets. For example, thread_indent() is defined in indent.stp.
+User-Space Probing
+SystemTap initially focused on kernel-space probing. However, there are many instances where user-
+space probing can help diagnose a problem. SystemTap 0.6 added support to allow probing user- space processes. SystemTap includes support for probing the entry into and return from a function in user-space processes, probing predefined markers in user-space code, and monitoring user-process events.
+The SystemTap user-space probing requires the utrace kernel extensions which provide an API for tracking various user-space events. More details about the utrace infrastructure are available at http://
+sourceware.org/systemtap/wiki/utrace. The following command determines whether the currently running Linux kernel provides the needed utrace support:
+grep CONFIG_UTRACE /boot/config-`uname -r`
+If the Linux kernel support user-space probing, the following output is printed:
+CONFIG_UTRACE=y
+The SystemTap user-space probing also needs the uprobes kernel module. If the uprobes kernel module is not available, you will see an error message like the following when attempting to run a script that requires the uprobes kernel module:
+SystemTap's version of uprobes is out of date.
+As root, or a member of the 'root' group, run
+"make -C /usr/share/systemtap/runtime/uprobes".
+Pass 4: compilation failed. Try again with another '--vp 0001' option.
+If this occurs, you need to generate a uprobes.ko module for the kernel as directed.
+4.1. User-Space Events
+All user-space event probes begin with process. The process events can be limited to a specific running process by specifying the process ID. The process events can also be limited to monitoring a particular executable by specifying the path to executable (PATH). SystemTap makes use of the PATH environment variable, so both the name used on the command-line to start the executable and the absolute path to the executable can be used. Several of user-space probe events limit their scope to a particular executable name (PATH) because SystemTap must use debug information to statically analyzed where to places the probes, but for many user-space probes events the process ID and executable name are optional. Any process event in the list below that include process ID or the path to the executable must include those arguments. The process ID and path to the executable are optional for the process events that do not list them:
+process("PATH").function("function")
+The entry to the user-space function function for the executable PATH. This event is the user-space analogue of the kernel.function("function") event. It allows wildcards for the function function and .return suffix.
+process("PATH").statement("statement")
+The earliest instruction in the code for statement. This is the user-space analogue of kernel.statement("statement").
+process("PATH").mark("marker")
+The static probe point marker defined in PATH. Wildcards can be used for marker to specify
+mutiple marks with a single probe. The static probe points may also have numbered arguments
+($1, $2, etc.) available to the probe. A variety of user-space packages such as Java include these
+static probe points. Most packages that provide static probe points also provide aliases for the raw
+user-space mark events. Below is one such alias for the x86_64 Java hotspot JVM:
+probe hotspot.gc_begin =
+process("/usr/lib/jvm/java-1.6.0-openjdk-1.6.0.0.x86_64/jre/lib/amd64/server/
+libjvm.so").mark("gc__begin")
+process.begin
+User-space process is created. This can be limited to a particular process ID or a full path to the
+executable.
+process.thread.begin
+User-space thread is created. This can be limited to a particular process ID or a full path to the
+executable.
+process.end
+User-space process died. This can be limited to a particular process ID or a full path to the executable.
+process.thread.end
+User-space thread is destroyed. This can be limited to a particular process ID or a full path to the
+executable.
+process.syscall
+User-space process makes a system call. The system call number is available via $syscall context variable, and the fist six arguments are available via $arg1 through $arg6. The ".return" suffix will place the probe at the return from the system call. For the "syscall.return" the return value is available through the $return context variable. This can be limited to a particular process ID or a full path to the executable.
+4.2. Accessing User-Space Target Variables
+User-space target variables can be accessed in the same manner as described in Section 3.3.2, “Target Variables”. However, in Linux there are separate address spaces for the user and kernel code. When using "->" operator SystemTap will access the appropriate address space. For pointers to base types such as integers and strings there are a number of functions listed below to access user-space data. The first argument for each functions is the pointer to the data item.
+user_char(address)
+Obtain the character at address for the current user process.
+user_short(address)
+Obtain the short at address for the current user process.
+user_int(address)
+Obtain the int at address for the current user process.
+user_long(address)
+Obtain the long at address for the current user process.
+user_string(address)
+Obtain the string at address for the current user process.
+user_string_n(address, n)
+Obtain the string at address for the current user process and limits the string to n bytes.
+4.3. User-Space Stack Backtraces
+The probe point (pp) function indicates which particular event triggered the the SystemTap event handler. A probe on the entry into a function would list the function name. However, in many cases the
+same probe point event may be triggered by many different modules in the program; this is particularly
+true for functions in shared libraries. A SystemTap backtrace of the user-space stack can provide additional context on how the probe point event is triggered.
+The user-space stack backtrace generation is complicated by the compiler producing code optimized
+to eliminate stack frame pointers. However, the compiler also includes information in the debug information section to allow debugging tools to produce stack backtraces. SystemTap user-space stack backtrace mechanism makes use of that debug information to walk the stack to generate stack traces for 32-bit and 64-bit x86 processors; other processor architectures do not yet support the use of debug information to unwind the user-space stack. You will need to use the -d executable for the application executable and -ldd for shared libraries to ensure that the needed debug information is used to produce the user-space stack backtraces.
+If you want to see how the function xmalloc function is being called by the command ls, you could use the user-space backtrack functions to provide that information. With the debuginfo for the ls command installed the following SystemTap command will provide a backtrace each time the xmalloc function is called:
+stap -d /bin/ls --ldd \
+-e 'probe process("ls").function("xmalloc") {print_usyms(ubacktrace())}' \
+-c "ls /"
+When the SystemTap script runs will have output similar to the following:
+bin dev
+lib
+media net
+proc sbin sys var
+boot etc
+lib64
+misc op_session profilerc selinux tmp
+cgroup home lost+found mnt opt
+root srv usr
+0x4116c0 : xmalloc+0x0/0x20 [/bin/ls]
+0x4116fc : xmemdup+0x1c/0x40 [/bin/ls]
+0x40e68b : clone_quoting_options+0x3b/0x50 [/bin/ls]
+0x4087e4 : main+0x3b4/0x1900 [/bin/ls]
+0x3fa441ec5d : __libc_start_main+0xfd/0x1d0 [/lib64/libc-2.12.so]
+0x402799 : _start+0x29/0x2c [/bin/ls]
+0x4116c0 : xmalloc+0x0/0x20 [/bin/ls]
+0x4116fc : xmemdup+0x1c/0x40 [/bin/ls]
+0x40e68b : clone_quoting_options+0x3b/0x50 [/bin/ls]
+0x40884a : main+0x41a/0x1900 [/bin/ls]
+0x3fa441ec5d : __libc_start_main+0xfd/0x1d0 [/lib64/libc-2.12.so]
+...
+For more details on the functions available for user-space stack backtraces look at the ucontext-symbols.stp and ucontext-unwind.stp tapsets. The descriptions of the functions in those tapsets can also be found in the SystemTap Tapset Reference Manual.  
+
+
