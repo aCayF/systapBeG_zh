@@ -857,4 +857,584 @@ root srv usr
 ...
 For more details on the functions available for user-space stack backtraces look at the ucontext-symbols.stp and ucontext-unwind.stp tapsets. The descriptions of the functions in those tapsets can also be found in the SystemTap Tapset Reference Manual.  
 
+Useful SystemTap Scripts
+This chapter enumerates several SystemTap scripts you can use to monitor and investigate different subsystems. All of these scripts are available at /usr/share/systemtap/testsuite/systemtap.examples/ once you install the systemtap-testsuite RPM.
+5.1. Network
+The following sections showcase scripts that trace network-related functions and build a profile of network activity.
+5.1.1. Network Profiling
+This section describes how to profile network activity. nettop.stp provides a glimpse into how much network traffic each process is generating on a machine.
+nettop.stp
+#! /usr/bin/env stap
+global ifxmit, ifrecv
+global ifmerged
+probe netdev.transmit
+{
+ifxmit[pid(), dev_name, execname(), uid()] <<< length
+}
+probe netdev.receive
+{
+ifrecv[pid(), dev_name, execname(), uid()] <<< length
+}
+function print_activity()
+{
+printf("%5s %5s %-7s %7s %7s %7s %7s %-15s\n",
+"PID", "UID", "DEV", "XMIT_PK", "RECV_PK",
+"XMIT_KB", "RECV_KB", "COMMAND")
+foreach ([pid, dev, exec, uid] in ifrecv) {
+ifmerged[pid, dev, exec, uid] += @count(ifrecv[pid,dev,exec,uid]);
+}
+foreach ([pid, dev, exec, uid] in ifxmit) {
+ifmerged[pid, dev, exec, uid] += @count(ifxmit[pid,dev,exec,uid]);
+}
+foreach ([pid, dev, exec, uid] in ifmerged-) {
+n_xmit = @count(ifxmit[pid, dev, exec, uid])
+n_recv = @count(ifrecv[pid, dev, exec, uid])
+printf("%5d %5d %-7s %7d %7d %7d %7d %-15s\n",
+pid, uid, dev, n_xmit, n_recv,
+n_xmit ? @sum(ifxmit[pid, dev, exec, uid])/1024 : 0,
+n_recv ? @sum(ifrecv[pid, dev, exec, uid])/1024 : 0,
+exec)
+}
+print("\n")
+delete ifxmit
+delete ifrecv
+delete ifmerged
+}
+probe timer.ms(5000), end, error
+{
+print_activity()
+}
+Note that function print_activity() uses the following expressions:
+n_xmit ? @sum(ifxmit[pid, dev, exec, uid])/1024 : 0
+n_recv ? @sum(ifrecv[pid, dev, exec, uid])/1024 : 0
+These expressions are if/else conditionals. The first statement is simply a more concise way of writing the following psuedo code:
+if n_recv != 0 then
+@sum(ifrecv[pid, dev, exec, uid])/1024
+else
+0
+nettop.stp tracks which processes are generating network traffic on the system, and provides the following information about each process:
+• PID — the ID of the listed process.
+• UID — user ID. A user ID of 0 refers to the root user.
+• DEV — which ethernet device the process used to send / receive data (e.g. eth0, eth1)
+• XMIT_PK — number of packets transmitted by the process
+• RECV_PK — number of packets received by the process
+• XMIT_KB — amount of data sent by the process, in kilobytes
+• RECV_KB — amount of data received by the service, in kilobytes
+nettop.stp provides network profile sampling every 5 seconds. You can change this setting by editing
+probe timer.ms(5000) accordingly. Example 5.1, “nettop.stp Sample Output” contains an excerpt
+of the output from nettop.stp over a 20-second period:
+Example 5.1. nettop.stp Sample Output
 
+5.1.2. Tracing Functions Called in Network Socket Code
+This section describes how to trace functions called from the kernel's net/socket.c file. This task
+helps you identify, in finer detail, how each process interacts with the network at the kernel level.
+socket-trace.stp
+#! /usr/bin/env stap
+probe kernel.function("*@net/socket.c").call {
+printf ("%s -> %s\n", thread_indent(1), ppfunc())
+}
+probe kernel.function("*@net/socket.c").return {
+printf ("%s <- %s\n", thread_indent(-1), ppfunc())
+}
+socket-trace.stp is identical to Example 3.6, “thread_indent.stp”, which was earlier used in SystemTap Functions to illustrate how thread_indent() works.
+Example 5.2. socket-trace.stp Sample Output
+[...]
+0 Xorg(3611): -> sock_poll
+3 Xorg(3611): <- sock_poll
+0 Xorg(3611): -> sock_poll
+3 Xorg(3611): <- sock_poll
+0 gnome-terminal(11106): -> sock_poll
+5 gnome-terminal(11106): <- sock_poll
+0 scim-bridge(3883): -> sock_poll
+3 scim-bridge(3883): <- sock_poll
+0 scim-bridge(3883): -> sys_socketcall
+4 scim-bridge(3883): -> sys_recv
+8 scim-bridge(3883):
+-> sys_recvfrom
+12 scim-bridge(3883):-> sock_from_file
+16 scim-bridge(3883):<- sock_from_file
+20 scim-bridge(3883):-> sock_recvmsg
+24 scim-bridge(3883):<- sock_recvmsg
+28 scim-bridge(3883):
+<- sys_recvfrom
+31 scim-bridge(3883): <- sys_recv
+35 scim-bridge(3883): <- sys_socketcall
+[...]
+Example 5.2, “socket-trace.stp Sample Output” contains a 3-second excerpt of the output for socket-trace.stp. For more information about the output of this script as provided by thread_indent(),refer to SystemTap Functions Example 3.6, “thread_indent.stp”.
+5.1.3. Monitoring Incoming TCP Connections
+5.1.2. Tracing Functions Called in Network Socket Code
+This section illustrates how to monitor incoming TCP connections. This task is useful in identifying any
+unauthorized, suspicious, or otherwise unwanted network access requests in real time.
+tcp_connections.stp
+#! /usr/bin/env stap
+probe begin {
+printf("%6s %16s %6s %6s %16s\n",
+"UID", "CMD", "PID", "PORT", "IP_SOURCE")
+}
+probe kernel.function("tcp_accept").return?,
+kernel.function("inet_csk_accept").return? {
+sock = $return
+if (sock != 0)
+printf("%6d %16s %6d %6d %16s\n", uid(), execname(), pid(),
+inet_get_local_port(sock), inet_get_ip_source(sock))
+}
+While tcp_connections.stp is running, it will print out the following information about any incoming TCP connections accepted by the system in real time:
+• Current UID
+• CMD - the command accepting the connection
+• PID of the command
+• Port used by the connection
+• IP address from which the TCP connection originated
+Example 5.3. tcp_connections.stp Sample Output
+5.1.4. Monitoring TCP Packets
+This section illustrates how to monitor TCP packets received by the system. This is useful in analyzing network traffic generated by applications running on the system.
+tcpdumplike.stp
+#! /usr/bin/env stap
+// A TCP dump like example
+probe begin, timer.s(1) {
+printf("-----------------------------------------------------------------\n")
+printf("
+Source IP
+Dest IP SPort DPort U A P R S F \n")
+printf("-----------------------------------------------------------------\n")
+}
+probe tcp.receive {
+printf(" %15s %15s %5d %5d %d %d %d %d %d %d\n",
+saddr, daddr, sport, dport, urg, ack, psh, rst, syn, fin)
+}
+While tcpdumplike.stp is running, it will print out the following information about any received TCP packets in real time:
+• Source and destination IP address (saddr, daddr, respectively)
+• Source and destination ports (sport, dport, respectively)
+• Packet flags
+To determine the flags used by the packet, tcpdumplike.stp uses the following functions:
+• urg - urgent
+• ack - acknowledgement
+• psh - push
+• rst - reset
+• syn - synchronize
+• fin - finished
+The aforementioned functions return 1 or 0 to specify whether the packet uses the corresponding flag.
+Example 5.4. tcpdumplike.stp Sample Output
+
+5.1.5. Monitoring Network Packets Drops in Kernel
+The network stack in Linux can discard packets for various reasons. Some Linux kernels include a tracepoint, kernel.trace("kfree_skb"), which easily tracks where packets are discarded. dropwatch.stp uses kernel.trace("kfree_skb") to trace packet discards; the script summarizes which locations discard packets every five-second interval.
+dropwatch.stp
+#! /usr/bin/env stap
+############################################################
+# Dropwatch.stp
+# Author: Neil Horman <nhorman@redhat.com>
+# An example script to mimic the behavior of the dropwatch utility
+# http://fedorahosted.org/dropwatch
+############################################################
+# Array to hold the list of drop points we find
+global locations
+# Note when we turn the monitor on and off
+probe begin { printf("Monitoring for dropped packets\n") }
+probe end { printf("Stopping dropped packet monitor\n") }
+# increment a drop counter for every location we drop at
+probe kernel.trace("kfree_skb") { locations[$location] <<< 1 }
+# Every 5 seconds report our drop locations
+probe timer.sec(5)
+{
+printf("\n")
+foreach (l in locations-) {
+printf("%d packets dropped at %s\n",
+@count(locations[l]), symname(l))
+}
+delete locations
+}
+The kernel.trace("kfree_skb") traces which places in the kernel drop network packets. The
+kernel.trace("kfree_skb") has two arguments: a pointer to the buffer being freed ($skb) and
+the location in kernel code the buffer is being freed ($location). The dropwatch.stp script provides the function containing $location where possible. The information to map $location back to the function is not in the instrumentation by default. On Systemtap 1.4 the --all-modules option will include the required mapping information and the following command can be used to run the script:
+stap --all-modules dropwatch.stp
+On older versions of Systemtap you can use the following command to emulate the --all-modules
+option:
+stap -dkernel \
+`cat /proc/modules | awk 'BEGIN { ORS = " " } {print "-d"$1}'` \
+dropwatch.stp
+Running the dropwatch.stp script 15 seconds would result in output similar in Example 5.5,
+“dropwatch.stp Sample Output”. The output lists the number of misses for each tracepoint location with either the function name or the address.
+Example 5.5. dropwatch.stp Sample Output
+Monitoring for dropped packets
+1762 packets dropped at unix_stream_recvmsg
+4 packets dropped at tun_do_read
+2 packets dropped at nf_hook_slow
+467 packets dropped at unix_stream_recvmsg
+20 packets dropped at nf_hook_slow
+6 packets dropped at tun_do_read
+446 packets dropped at unix_stream_recvmsg
+4 packets dropped at tun_do_read
+4 packets dropped at nf_hook_slow
+Stopping dropped packet monitor
+When the script is being compiled on one machine and run on another the --all-modules and /
+proc/modules directory are not available; the symname function will just print out the raw address. To make the raw address of packet drops more meaningful, refer to the /boot/System.map-`uname -r` file. This file lists the starting addresses for each function, allowing you to map the addresses in the output of Example 5.5, “dropwatch.stp Sample Output” to a specific function name. Given the following snippet of the /boot/System.map-`uname -r` file, the address 0xffffffff8149a8ed maps to the function unix_stream_recvmsg:
+[...]
+ffffffff8149a420 t unix_dgram_poll
+ffffffff8149a5e0 t unix_stream_recvmsg
+ffffffff8149ad00 t unix_find_other
+[...]
+5.2. Disk
+The following sections showcase scripts that monitor disk and I/O activity.
+5.2.1. Summarizing Disk Read/Write Traffic
+This section describes how to identify which processes are performing the heaviest disk reads/writes to the system.
+disktop.stp
+#!/usr/bin/env stap
+#
+# Copyright (C) 2007 Oracle Corp.
+#
+# Get the status of reading/writing disk every 5 seconds,
+# output top ten entries
+#
+# This is free software,GNU General Public License (GPL);
+# either version 2, or (at your option) any later version.
+#
+# Usage:
+# ./disktop.stp
+#
+global io_stat,device
+global read_bytes,write_bytes
+probe vfs.read.return {
+if ($return>0) {
+if (devname!="N/A") {/*skip read from cache*/
+io_stat[pid(),execname(),uid(),ppid(),"R"] += $return
+device[pid(),execname(),uid(),ppid(),"R"] = devname
+read_bytes += $return
+}
+}
+}
+probe vfs.write.return {
+if ($return>0) {
+if (devname!="N/A") { /*skip update cache*/
+io_stat[pid(),execname(),uid(),ppid(),"W"] += $return
+device[pid(),execname(),uid(),ppid(),"W"] = devname
+write_bytes += $return
+}
+}
+}
+probe timer.ms(5000) {
+/* skip non-read/write disk */
+if (read_bytes+write_bytes) {
+printf("\n%-25s, %-8s%4dKb/sec, %-7s%6dKb, %-7s%6dKb\n\n",
+ctime(gettimeofday_s()),
+"Average:", ((read_bytes+write_bytes)/1024)/5,
+"Read:",read_bytes/1024,
+"Write:",write_bytes/1024)
+/* print header */
+printf("%8s %8s %8s %25s %8s %4s %12s\n",
+"UID","PID","PPID","CMD","DEVICE","T","BYTES")
+}
+/* print top ten I/O */
+foreach ([process,cmd,userid,parent,action] in io_stat- limit 10)
+printf("%8d %8d %8d %25s %8s %4s %12d\n",
+userid,process,parent,cmd,
+device[process,cmd,userid,parent,action],
+action,io_stat[process,cmd,userid,parent,action])
+/* clear data */
+delete io_stat
+delete device
+read_bytes = 0
+write_bytes = 0
+}
+probe end{
+delete io_stat
+delete device
+delete read_bytes
+delete write_bytes
+}
+disktop.stp outputs the top ten processes responsible for the heaviest reads/writes to disk.
+Example 5.6, “disktop.stp Sample Output” displays a sample output for this script, and includes the following data per listed process:
+• UID — user ID. A user ID of 0 refers to the root user.
+• PID — the ID of the listed process.
+• PPID — the process ID of the listed process's parent process.
+• CMD — the name of the listed process.
+• DEVICE — which storage device the listed process is reading from or writing to.
+• T — the type of action performed by the listed process; W refers to write, while R refers to read.
+• BYTES — the amount of data read to or written from disk.
+The time and date in the output of disktop.stp is returned by the functions ctime() and
+gettimeofday_s(). ctime() derives calendar time in terms of seconds passed since the Unix
+
+epoch (January 1, 1970). gettimeofday_s() counts the actual number of seconds since Unix
+epoch, which gives a fairly accurate human-readable timestamp for the output.
+In this script, the $return is a local variable that stores the actual number of bytes each process
+reads or writes from the virtual file system. $return can only be used in return probes (e.g.
+vfs.read.return and vfs.read.return).
+Example 5.6. disktop.stp Sample Output
+5.2.2. Tracking I/O Time For Each File Read or Write
+This section describes how to monitor the amount of time it takes for each process to read from or write to any file. This is useful if you wish to determine what files are slow to load on a given system.
+iotime.stp
+#! /usr/bin/env stap
+/*
+* Copyright (C) 2006-2007 Red Hat Inc.
+*
+* This copyrighted material is made available to anyone wishing to use,
+* modify, copy, or redistribute it subject to the terms and conditions
+* of the GNU General Public License v.2.
+*
+* You should have received a copy of the GNU General Public License
+* along with this program. If not, see <http://www.gnu.org/licenses/>.
+*
+* Print out the amount of time spent in the read and write systemcall
+* when each file opened by the process is closed. Note that the systemtap
+* script needs to be running before the open operations occur for
+* the script to record data.
+*
+* This script could be used to to find out which files are slow to load
+* on a machine. e.g.
+*
+* stap iotime.stp -c 'firefox'
+*
+* Output format is:
+* timestamp pid (executabable) info_type path ...
+*
+* 200283135 2573 (cupsd) access /etc/printcap read: 0 write: 7063
+* 200283143 2573 (cupsd) iotime /etc/printcap time: 69
+*
+*/
+global start
+global time_io
+function timestamp:long() { return gettimeofday_us() - start }
+function proc:string() { return sprintf("%d (%s)", pid(), execname()) }
+probe begin { start = gettimeofday_us() }
+global filehandles, fileread, filewrite
+probe syscall.open.return {
+filename = user_string($filename)
+if ($return != -1) {
+filehandles[pid(), $return] = filename
+} else {
+printf("%d %s access %s fail\n", timestamp(), proc(), filename)
+}
+}
+probe syscall.read.return {
+p = pid()
+fd = $fd
+bytes = $return
+time = gettimeofday_us() - @entry(gettimeofday_us())
+if (bytes > 0)
+fileread[p, fd] += bytes
+time_io[p, fd] <<< time
+}
+probe syscall.write.return {
+p = pid()
+fd = $fd
+bytes = $return
+time = gettimeofday_us() - @entry(gettimeofday_us())
+if (bytes > 0)
+filewrite[p, fd] += bytes
+time_io[p, fd] <<< time
+}
+probe syscall.close {
+if ([pid(), $fd] in filehandles) {
+printf("%d %s access %s read: %d write: %d\n",
+timestamp(), proc(), filehandles[pid(), $fd],
+fileread[pid(), $fd], filewrite[pid(), $fd])
+if (@count(time_io[pid(), $fd]))
+printf("%d %s iotime %s time: %d\n", timestamp(), proc(),
+filehandles[pid(), $fd], @sum(time_io[pid(), $fd]))
+}
+delete fileread[pid(), $fd]
+delete filewrite[pid(), $fd]
+delete filehandles[pid(), $fd]
+delete time_io[pid(),$fd]
+}
+iotime.stp tracks each time a system call opens, closes, reads from, and writes to a file. For each file any system call accesses, iotime.stp counts the number of microseconds it takes for any reads or writes to finish and tracks the amount of data (in bytes) read from or written to the file.
+iotime.stp also uses the local variable $count to track the amount of data (in bytes) that any
+system call attempts to read or write. Note that $return (as used in disktop.stp from Section 5.2.1,
+“Summarizing Disk Read/Write Traffic”) stores the actual amount of data read/written. $count can only be used on probes that track data reads or writes (e.g. syscall.read and syscall.write).
+
+Example 5.7. iotime.stp Sample Output
+[...]
+825946 3364 (NetworkManager) access /sys/class/net/eth0/carrier read: 8190 write: 0
+825955 3364 (NetworkManager) iotime /sys/class/net/eth0/carrier time: 9
+[...]
+117061 2460 (pcscd) access /dev/bus/usb/003/001 read: 43 write: 0
+117065 2460 (pcscd) iotime /dev/bus/usb/003/001 time: 7
+[...]
+3973737 2886 (sendmail) access /proc/loadavg read: 4096 write: 0
+3973744 2886 (sendmail) iotime /proc/loadavg time: 11
+[...]
+Example 5.7, “iotime.stp Sample Output” prints out the following data:
+• A timestamp, in microseconds.
+• Process ID and process name.
+• An access or iotime flag.
+• The file accessed.
+If a process was able to read or write any data, a pair of access and iotime lines should appear
+together. The access line's timestamp refers to the time that a given process started accessing a file;at the end of the line, it will show the amount of data read/written (in bytes). The iotime line will show the amount of time (in microseconds) that the process took in order to perform the read or write. If an access line is not followed by an iotime line, it simply means that the process did not read or write any data.
+5.2.3. Track Cumulative IO
+This section describes how to track the cumulative amount of I/O to the system.
+traceio.stp
+#! /usr/bin/env stap
+# traceio.stp
+# Copyright (C) 2007 Red Hat, Inc., Eugene Teo <eteo@redhat.com>
+# Copyright (C) 2009 Kai Meyer <kai@unixlords.com>
+#
+Fixed a bug that allows this to run longer
+#
+And added the humanreadable function
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License version 2 as
+# published by the Free Software Foundation.
+#
+global reads, writes, total_io
+probe vfs.read.return {
+reads[pid(),execname()] += $return
+total_io[pid(),execname()] += $return
+}
+probe vfs.write.return {
+writes[pid(),execname()] += $return
+total_io[pid(),execname()] += $return
+}
+function humanreadable(bytes) {
+if (bytes > 1024*1024*1024) {
+return sprintf("%d GiB", bytes/1024/1024/1024)
+} else if (bytes > 1024*1024) {
+return sprintf("%d MiB", bytes/1024/1024)
+} else if (bytes > 1024) {
+return sprintf("%d KiB", bytes/1024)
+} else {
+return sprintf("%d
+B", bytes)
+}
+}
+probe timer.s(1) {
+foreach([p,e] in total_io- limit 10)
+printf("%8d %15s r: %12s w: %12s\n",
+p, e, humanreadable(reads[p,e]),
+humanreadable(writes[p,e]))
+printf("\n")
+# Note we don't zero out reads, writes and total_io,
+# so the values are cumulative since the script started.
+}
+traceio.stp prints the top ten executables generating I/O traffic over time. In addition, it also tracks the cumulative amount of I/O reads and writes done by those ten executables. This information is tracked and printed out in 1-second intervals, and in descending order.
+Note that traceio.stp also uses the local variable $return, which is also used by disktop.stp from
+Section 5.2.1, “Summarizing Disk Read/Write Traffic”.
+Example 5.8. traceio.stp Sample Output
+5.2.4. I/O Monitoring (By Device)
+This section describes how to monitor I/O activity on a specific device.
+traceio2.stp
+#! /usr/bin/env stap
+global device_of_interest
+probe begin {
+/* The following is not the most efficient way to do this.
+One could directly put the result of usrdev2kerndev()
+into device_of_interest. However, want to test out
+the other device functions */
+dev = usrdev2kerndev($1)
+device_of_interest = MKDEV(MAJOR(dev), MINOR(dev))
+}
+probe vfs.write, vfs.read
+{
+if (dev == device_of_interest)
+printf ("%s(%d) %s 0x%x\n",
+execname(), pid(), probefunc(), dev)
+}
+traceio2.stp takes 1 argument: the whole device number. To get this number, use stat -c "0x%D"
+directory, where directory is located in the device you wish to monitor.
+The usrdev2kerndev() function converts the whole device number into the format understood by
+the kernel. The output produced by usrdev2kerndev() is used in conjunction with the MKDEV(),
+MINOR(), and MAJOR() functions to determine the major and minor numbers of a specific device.
+The output of traceio2.stp includes the name and ID of any process performing a read/write, the
+function it is performing (i.e. vfs_read or vfs_write), and the kernel device number.The following example is an excerpt from the full output of stap traceio2.stp 0x805, where 0x805 is the whole device number of /home. /home resides in /dev/sda5, which is the device we wish to monitor.
+Example 5.9. traceio2.stp Sample Output
+[...]
+synergyc(3722) vfs_read 0x800005
+synergyc(3722) vfs_read 0x800005
+cupsd(2889) vfs_write 0x800005
+cupsd(2889) vfs_write 0x800005
+cupsd(2889) vfs_write 0x800005
+[...]
+5.2.5. Monitoring Reads and Writes to a File
+This section describes how to monitor reads from and writes to a file in real time.
+inodewatch.stp
+#! /usr/bin/env stap
+probe vfs.write, vfs.read
+{
+# dev and ino are defined by vfs.write and vfs.read
+if (dev == MKDEV($1,$2) # major/minor device
+&& ino == $3)
+printf ("%s(%d) %s 0x%x/%u\n",
+execname(), pid(), probefunc(), dev, ino)
+}
+inodewatch.stp takes the following information about the file as arguments on the command line:
+• The file's major device number.
+• The file's minor device number.
+• The file's inode number.
+To get this information, use stat -c '%D %i' filename, where filename is an absolute path.
+For instance: if you wish to monitor /etc/crontab, run stat -c '%D %i' /etc/crontab first.
+This gives the following output:
+805 1078319
+805 is the base-16 (hexadecimal) device number. The lower two digits are the minor device number and the upper digits are the major number. 1078319 is the inode number. To start monitoring /etc/crontab, run stap inodewatch.stp 0x8 0x05 1078319 (The 0x prefixes indicate base-16 values. The output of this command contains the name and ID of any process performing a read/write, the function it is performing (i.e. vfs_read or vfs_write), the device number (in hex format), and the inode number. Example 5.10, “inodewatch.stp Sample Output” contains the output of stap inodewatch.stp 0x8 0x05 1078319 (when cat /etc/crontab is executed while the script is running) :
+Example 5.10. inodewatch.stp Sample Output
+cat(16437) vfs_read 0x800005/1078319
+cat(16437) vfs_read 0x800005/1078319
+5.2.6. Monitoring Changes to File Attributes
+This section describes how to monitor if any processes are changing the attributes of a targeted file, in real time.
+inodewatch2.stp
+#! /usr/bin/env stap
+global ATTR_MODE = 1
+probe kernel.function("setattr_copy")!,
+kernel.function("generic_setattr")!,
+kernel.function("inode_setattr") {
+dev_nr = $inode->i_sb->s_dev
+inode_nr = $inode->i_ino
+if (dev_nr == MKDEV($1,$2) # major/minor device
+&& inode_nr == $3
+&& $attr->ia_valid & ATTR_MODE)
+printf ("%s(%d) %s 0x%x/%u %o %d\n",
+execname(), pid(), probefunc(), dev_nr, inode_nr, $attr->ia_mode, uid())
+}
+Like inodewatch.stp from Section 5.2.5, “Monitoring Reads and Writes to a File”, inodewatch2.stp
+takes the targeted file's device number (in integer format) and inode number as arguments. For more information on how to retrieve this information, refer to Section 5.2.5, “Monitoring Reads and Writes to a File”. The output for inodewatch2.stp is similar to that of inodewatch.stp, except that inodewatch2.stp also contains the attribute changes to the monitored file, as well as the ID of the user responsible (uid()). Example 5.11, “inodewatch2.stp Sample Output” shows the output of inodewatch2.stp while monitoring /home/joe/bigfile when user joe executes chmod 777 /home/joe/bigfile and chmod 666 /home/joe/bigfile.
+Example 5.11. inodewatch2.stp Sample Output
+chmod(17448) inode_setattr 0x800005/6011835 100777 500
+chmod(17449) inode_setattr 0x800005/6011835 100666 500
+5.2.7. Periodically Print I/O Block Time
+This section describes how to track the amount of time each block I/O requests spends waiting for completion. This is useful in determining whether there are too many outstanding block I/O operations at any given time.
+ioblktime.stp
+#! /usr/bin/env stap
+global req_time, etimes
+probe ioblock.request
+{
+req_time[$bio] = gettimeofday_us()
+}
+probe ioblock.end
+{
+t = gettimeofday_us()
+s = req_time[$bio]
+delete req_time[$bio]
+if (s) {
+etimes[devname, bio_rw_str(rw)] <<< t - s
+}
+}
+/* for time being delete things that get merged with others */
+probe kernel.trace("block_bio_frontmerge"),
+kernel.trace("block_bio_backmerge")
+{
+delete req_time[$bio]
+}
+probe timer.s(10), end {
+ansi_clear_screen()
+printf("%10s %3s %10s %10s %10s\n",
+"device", "rw", "total (us)", "count", "avg (us)")
+foreach ([dev,rw] in etimes - limit 20) {
+printf("%10s %3s %10d %10d %10d\n", dev, rw,
+@sum(etimes[dev,rw]), @count(etimes[dev,rw]), @avg(etimes[dev,rw]))
+}
+delete etimes
+}
+ioblktime.stp computes the average waiting time for block I/O per device, and prints a list every
+10 seconds. As always, you can revise this refresh rate by editing the specified value in probe
+timer.s(10), end {.In some cases, there can be too many outstanding block I/O operations, at which point the script can exceed the default number of MAXMAPENTRIES. MAXMAPENTRIES is the maximum number of rows in an array if the array size is not specified explicitly when declared. If the script exceeds the default MAXMAPENTRIES value of 2048, run the script again with the stap option -DMAXMAPENTRIES=10000.
+Example 5.12. ioblktime.stp Sample Output
+Example 5.12, “ioblktime.stp Sample Output” displays the device name, operations performed (rw), total wait time of all operations (total(us)), number of operations (count), and average wait time for all those operations (avg (us)). The times tallied by the script are in microseconds.
+5.3. Profiling
+The following sections showcase scripts that profile kernel activity by monitoring function calls.
+5.3.1. Counting Function Calls Made
+This section describes how to identify how many times the system called a specific kernel function in a 30-second sample. Depending on your use of wildcards, you can also use this script to target multiple kernel functions.
+functioncallcount.stp
+#! /usr/bin/env stap
+# The following line command will probe all the functions
+# in kernel's memory management code:
+#
+# stap functioncallcount.stp "*@mm/*.c"
+probe kernel.function(@1).call { # probe functions listed on commandline
+called[probefunc()] <<< 1 # add a count efficiently
