@@ -1438,3 +1438,368 @@ functioncallcount.stp
 # stap functioncallcount.stp "*@mm/*.c"
 probe kernel.function(@1).call { # probe functions listed on commandline
 called[probefunc()] <<< 1 # add a count efficiently
+global called
+probe end {
+foreach (fn in called-) # Sort by call count (in decreasing order)
+#
+(fn+ in called) # Sort by function name
+printf("%s %d\n", fn, @count(called[fn]))
+exit()
+}
+functioncallcount.stp takes the targeted kernel function as an argument. The argument supports
+wildcards, which enables you to target multiple kernel functions up to a certain extent. The output of functioncallcount.stp contains the name of the function called and how many times it
+was called during the sample time (in alphabetical order). Example 5.13, “functioncallcount.stp Sample Output” contains an excerpt from the output of stap functioncallcount.stp "*@mm/*.c":
+Example 5.13. functioncallcount.stp Sample Output
+[...]
+__vma_link 97
+__vma_link_file 66
+__vma_link_list 97
+__vma_link_rb 97
+__xchg 103
+add_page_to_active_list 102
+add_page_to_inactive_list 19
+add_to_page_cache 19
+add_to_page_cache_lru 7
+all_vm_events 6
+alloc_pages_node 4630
+alloc_slabmgmt 67
+anon_vma_alloc 62
+anon_vma_free 62
+anon_vma_lock 66
+anon_vma_prepare 98
+anon_vma_unlink 97
+anon_vma_unlock 66
+arch_get_unmapped_area_topdown 94
+arch_get_unmapped_exec_area 3
+arch_unmap_area_topdown 97
+atomic_add 2
+atomic_add_negative 97
+atomic_dec_and_test 5153
+atomic_inc 470
+atomic_inc_and_test 1
+[...]
+5.3.2. Call Graph Tracing
+This section describes how to trace incoming and outgoing function calls.
+para-callgraph.stp
+#! /usr/bin/env stap
+function trace(entry_p, extra) {
+%( $# > 1 %? if (tid() in trace) %)
+printf("%s%s%s %s\n",
+thread_indent (entry_p),
+(entry_p>0?"->":"<-"),
+ppfunc (),
+extra)
+}
+%( $# > 1 %?
+global trace
+probe $2.call {
+trace[tid()] = 1
+}
+probe $2.return {
+delete trace[tid()]
+}
+%)
+probe $1.call
+{ trace(1, $$parms) }
+probe $1.return { trace(-1, $$return) }
+para-callgraph.stp takes two command-line arguments:
+• The function/s whose entry/exit call you'd like to trace ($1).
+• A second optional trigger function ($2), which enables or disables tracing on a per-thread basis.
+Tracing in each thread will continue as long as the trigger function has not exited yet.
+para-callgraph.stp uses thread_indent(); as such, its output contains the timestamp, process
+name, and thread ID of $1 (i.e. the probe function you are tracing). For more information about
+thread_indent(), refer to its entry in SystemTap Functions.
+The following example contains an excerpt from the output for stap para-callgraph.stp
+'kernel.function("*@fs/*.c")' 'kernel.function("sys_read")':
+Example 5.14. para-callgraph.stp Sample Output
+[...]
+267 gnome-terminal(2921): <-do_sync_read return=0xfffffffffffffff5
+269 gnome-terminal(2921):<-vfs_read return=0xfffffffffffffff5
+0 gnome-terminal(2921):->fput file=0xffff880111eebbc0
+2 gnome-terminal(2921):<-fput
+0 gnome-terminal(2921):->fget_light fd=0x3 fput_needed=0xffff88010544df54
+3 gnome-terminal(2921):<-fget_light return=0xffff8801116ce980
+0 gnome-terminal(2921):->vfs_read file=0xffff8801116ce980 buf=0xc86504 count=0x1000
+pos=0xffff88010544df48
+4 gnome-terminal(2921): ->rw_verify_area read_write=0x0 file=0xffff8801116ce980
+ppos=0xffff88010544df48 count=0x1000
+7 gnome-terminal(2921): <-rw_verify_area return=0x1000
+12 gnome-terminal(2921): ->do_sync_read filp=0xffff8801116ce980 buf=0xc86504
+len=0x1000 ppos=0xffff88010544df48
+15 gnome-terminal(2921): <-do_sync_read return=0xfffffffffffffff5
+18 gnome-terminal(2921):<-vfs_read return=0xfffffffffffffff5
+0 gnome-terminal(2921):->fput file=0xffff8801116ce980
+5.3.3. Determining Time Spent in Kernel and User Space
+This section illustrates how to determine the amount of time any given thread is spending in either kernel or user-space.
+thread-times.stp
+#! /usr/bin/env stap
+probe perf.sw.cpu_clock!, timer.profile {
+// NB: To avoid contention on SMP machines, no global scalars/arrays used,
+// only contention-free statistics aggregates.
+tid=tid(); e=execname()
+if (!user_mode())
+kticks[e,tid] <<< 1
+else
+uticks[e,tid] <<< 1
+ticks <<< 1
+tids[e,tid] <<< 1
+}
+global uticks, kticks, ticks
+global tids
+probe timer.s(5), end {
+allticks = @count(ticks)
+printf ("%16s %5s %7s %7s (of %d ticks)\n",
+"comm", "tid", "%user", "%kernel", allticks)
+foreach ([e,tid] in tids- limit 20) {
+uscaled = @count(uticks[e,tid])*10000/allticks
+kscaled = @count(kticks[e,tid])*10000/allticks
+printf ("%16s %5d %3d.%02d%% %3d.%02d%%\n",
+e, tid, uscaled/100, uscaled%100, kscaled/100, kscaled%100)
+}
+printf("\n")
+delete
+delete
+delete
+delete
+uticks
+kticks
+ticks
+tids
+}
+thread-times.stp lists the top 20 processes currently taking up CPU time within a 5-second sample, along with the total number of CPU ticks made during the sample. The output of this script also notes the percentage of CPU time each process used, as well as whether that time was spent in kernel space or user space.
+Example 5.15, “thread-times.stp Sample Output” contains a 5-second sample of the output for thread-times.stp:
+Example 5.15. thread-times.stp Sample Output
+5.3.4. Monitoring Polling Applications
+This section describes how to identify and monitor which applications are polling. Doing so allows you to track unnecessary or excessive polling, which can help you pinpoint areas for improvement in terms of CPU usage and power savings.
+timeout.stp
+#! /usr/bin/env stap
+# Copyright (C) 2009 Red Hat, Inc.
+# Written by Ulrich Drepper <drepper@redhat.com>
+# Modified by William Cohen <wcohen@redhat.com>
+global process, timeout_count, to
+global poll_timeout, epoll_timeout, select_timeout, itimer_timeout
+global nanosleep_timeout, futex_timeout, signal_timeout
+probe syscall.poll, syscall.epoll_wait {
+if (timeout) to[pid()]=timeout
+}
+probe syscall.poll.return {
+p = pid()
+if ($return == 0 && to[p] > 0 ) {
+poll_timeout[p]++
+timeout_count[p]++
+process[p] = execname()
+delete to[p]
+}
+}
+probe syscall.epoll_wait.return {
+p = pid()
+if ($return == 0 && to[p] > 0 ) {
+epoll_timeout[p]++
+timeout_count[p]++
+process[p] = execname()
+delete to[p]
+}
+}
+probe syscall.select.return {
+if ($return == 0) {
+p = pid()
+select_timeout[p]++
+timeout_count[p]++
+process[p] = execname()
+}
+}
+probe syscall.futex.return {
+if (errno_str($return) == "ETIMEDOUT") {
+p = pid()
+futex_timeout[p]++
+timeout_count[p]++
+process[p] = execname()
+}
+}
+probe syscall.nanosleep.return {
+if ($return == 0) {
+p = pid()
+nanosleep_timeout[p]++
+timeout_count[p]++
+process[p] = execname()
+}
+}
+probe kernel.function("it_real_fn") {
+p = pid()
+itimer_timeout[p]++
+timeout_count[p]++
+process[p] = execname()
+}
+probe syscall.rt_sigtimedwait.return {
+if (errno_str($return) == "EAGAIN") {
+p = pid()
+signal_timeout[p]++
+timeout_count[p]++
+process[p] = execname()
+}
+}
+probe syscall.exit {
+p = pid()
+if (p in process) {
+delete process[p]
+delete timeout_count[p]
+delete poll_timeout[p]
+delete epoll_timeout[p]
+delete select_timeout[p]
+delete itimer_timeout[p]
+delete futex_timeout[p]
+delete nanosleep_timeout[p]
+delete signal_timeout[p]
+}
+}
+probe timer.s(1) {
+ansi_clear_screen()
+printf (" pid |
+poll select
+epoll itimer
+futex nanosle
+foreach (p in timeout_count- limit 20) {
+printf ("%5d |%7d %7d %7d %7d %7d %7d %7d| %-.38s\n", p,
+poll_timeout[p], select_timeout[p],
+epoll_timeout[p], itimer_timeout[p],
+futex_timeout[p], nanosleep_timeout[p],
+signal_timeout[p], process[p])
+}
+}
+signal| process\n")
+timeout.stp tracks how many times each of the following system calls completed due to time expiring rather than due to an actual event occurring:
+You can increase the sample time by editing the second probe (timer.s(1)). The output of
+timeout.stp contains the name and UID of the top 20 polling applications, along with how many times each application performed each polling system call (over time). Example 5.16, “timeout.stp Sample
+Output” contains an excerpt of the script. In this particular example firefox is doing an excessive
+amount of polling due to a plugin module.
+5.3.5. Tracking Most Frequently Used System Calls
+timeout.stp from Section 5.3.4, “Monitoring Polling Applications” helps you identify which applications are polling by examining a small subset of system calls ( poll, select, epoll, itimer, futex, nanosleep, and signal). However, in some systems, an excessive number of system calls outside that small subset might be responsible for time spent in the kernel. If you suspect that an application is using system calls excessively, you need to identify the most frequently used system calls on the system. To do this, use topsys.stp.
+topsys.stp
+#! /usr/bin/env stap
+#
+# This script continuously lists the top 20 systemcalls in the interval
+# 5 seconds
+#
+global syscalls_count
+probe syscall.* {
+syscalls_count[name]++
+}
+function print_systop () {
+printf ("%25s %10s\n", "SYSCALL", "COUNT")
+foreach (syscall in syscalls_count- limit 20) {
+printf("%25s %10d\n", syscall, syscalls_count[syscall])
+}
+delete syscalls_count
+}
+probe timer.s(5) {
+print_systop ()
+printf("--------------------------------------------------------------\n")
+}
+topsys.stp lists the top 20 system calls used by the system per 5-second interval. It also lists how many times each system call was used during that period. Refer to Example 5.17, “topsys.stp Sample
+Output” for a sample output.
+Example 5.17. topsys.stp Sample Output
+5.3.6. Tracking System Call Volume Per Process
+This section illustrates how to determine which processes are performing the highest volume of
+system calls. In previous sections, we've described how to monitor the top system calls used by the system over time (Section 5.3.5, “Tracking Most Frequently Used System Calls”). We've also described how to identify which applications use a specific set of "polling suspect" system calls the most (Section 5.3.4, “Monitoring Polling Applications”). Monitoring the volume of system calls made by each process provides more data in investigating your system for polling processes and other resource hogs.
+syscalls_by_proc.stp
+#! /usr/bin/env stap
+#
+#
+#
+#
+#
+#
+Copyright (C) 2006 IBM Corp.
+This file is part of systemtap, and is free software. You can redistribute it and/or modify it under the terms of the GNU General Public License (GPL); either version 2, or (at your option) any
+later version.
+#
+# Print the system call count by process name in descending order.
+#
+global syscalls
+probe begin {
+print ("Collecting data... Type Ctrl-C to exit and display results\n")
+}
+probe syscall.* {
+syscalls[execname()]++
+}
+probe end {
+printf ("%-10s %-s\n", "#SysCalls", "Process Name")
+foreach (proc in syscalls-)
+printf("%-10d %-s\n", syscalls[proc], proc)
+}
+syscalls_by_proc.stp lists the top 20 processes performing the highest number of system calls. It also lists how many system calls each process performed during the time period. Refer to Example 5.18,
+“topsys.stp Sample Output” for a sample output.
+Example 5.18. topsys.stp Sample Output
+If you prefer the output to display the process IDs instead of the process names, use the following script instead.
+#! /usr/bin/env stap
+#
+#
+#
+#
+#
+#
+Copyright (C) 2006 IBM Corp.
+This file is part of systemtap, and is free software. You can redistribute it and/or modify it under the terms of the GNU General Public License (GPL); either version 2, or (at your option) any
+later version.
+#
+# Print the system call count by process ID in descending order.
+#
+global syscalls
+probe begin {
+print ("Collecting data... Type Ctrl-C to exit and display results\n")
+}
+probe syscall.* {
+syscalls[pid()]++
+}
+probe end {
+printf ("%-10s %-s\n", "#SysCalls", "PID")
+foreach (pid in syscalls-)
+printf("%-10d %-d\n", syscalls[pid], pid)
+}
+As indicated in the output, you need to manually exit the script in order to display the results. You can
+add a timed expiration to either script by simply adding a timer.s() probe; for example, to instruct
+the script to expire after 5 seconds, add the following probe to the script:
+probe timer.s(5)
+{
+exit()
+}
+5.4. Identifying Contended User-Space Locks
+This section describes how to identify contended user-space locks throughout the system within a specific time period. The ability to identify contended user-space locks can help you investigate poor program performance that you suspect may be caused by futex contentions.
+Simply put, futex contention occurs when multiple processes are trying to access the same lock
+variable at the same time. This can result in a poor performance because the lock serializes execution; one process obtains the lock while the other processes must wait for the lock variable to become available again.
+The futexes.stp script probes the futex system call to show lock contention.
+futexes.stp
+#! /usr/bin/env stap
+# This script tries to identify contended user-space locks by hooking
+# into the futex system call.
+global FUTEX_WAIT = 0 /*, FUTEX_WAKE = 1 */
+global FUTEX_PRIVATE_FLAG = 128 /* linux 2.6.22+ */
+global FUTEX_CLOCK_REALTIME = 256 /* linux 2.6.29+ */
+global lock_waits # long-lived stats on (tid,lock) blockage elapsed time
+global process_names # long-lived pid-to-execname mapping
+probe syscall.futex.return {
+if (($op & ~(FUTEX_PRIVATE_FLAG|FUTEX_CLOCK_REALTIME)) != FUTEX_WAIT) next
+process_names[pid()] = execname()
+elapsed = gettimeofday_us() - @entry(gettimeofday_us())
+lock_waits[pid(), $uaddr] <<< elapsed
+}
+probe end {
+foreach ([pid+, lock] in lock_waits)
+printf ("%s[%d] lock %p contended %d times, %d avg us\n",
+process_names[pid], pid, lock, @count(lock_waits[pid,lock]),
+@avg(lock_waits[pid,lock]))
+}
+futexes.stp needs to be manually stopped; upon exit, it prints the following information:
+• Name and ID of the process responsible for a contention
+• The location of the contested lock variable
+• How many times the lock variable was contended
+• Average time of contention throughout the probe
+Example 5.19, “futexes.stp Sample Output” contains an excerpt from the output of futexes.stp upon
+exiting the script (after approximately 20 seconds).
+Example 5.19. futexes.stp Sample Output
+[...]
+automount[2825] lock 0x00bc7784 contended 18
+synergyc[3686] lock 0x0861e96c contended 192
+synergyc[3758] lock 0x08d98744 contended 192
+synergyc[3938] lock 0x0982a8b4 contended 192
+
