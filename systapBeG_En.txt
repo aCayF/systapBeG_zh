@@ -1,3 +1,19 @@
+Introduction
+SystemTap is a tracing and probing tool that allows users to study and monitor the activities of the computer system (particularly, the kernel) in fine detail. It provides information similar to the output of tools like netstat, ps, top, and iostat; however, SystemTap is designed to provide more filtering and analysis options for collected information.
+1.1. Documentation Goals
+SystemTap provides the infrastructure to monitor the running Linux kernel for detailed analysis. This can assist administrators and developers in identifying the underlying cause of a bug or performance problem.
+Without SystemTap, monitoring the activity of a running kernel would require a tedious instrument, recompile, install, and reboot sequence. SystemTap is designed to eliminate this, allowing users to gather the same information by simply running user-written SystemTap scripts. However, SystemTap was initially designed for users with intermediate to advanced knowledge of the kernel. This makes SystemTap less useful to administrators or developers with limited knowledge of and experience with the Linux kernel. Moreover, much of the existing SystemTap documentation is similarly aimed at knowledgeable and experienced users. This makes learning the tool similarly difficult.
+To lower these barriers the SystemTap Beginners Guide was written with the following goals:
+• To introduce users to SystemTap, familiarize them with its architecture, and provide setup
+instructions.
+• To provide pre-written SystemTap scripts for monitoring detailed activity in different components of the system, along with instructions on how to run them and analyze their output.
+1.2. SystemTap Capabilities
+• Flexibility: SystemTap's framework allows users to develop simple scripts for investigating and
+monitoring a wide variety of kernel functions, system calls, and other events that occur in kernel-space. With this, SystemTap is not so much a tool as it is a system that allows you to develop your own kernel-specific forensic and monitoring tools.
+• Ease-Of-Use: as mentioned earlier, SystemTap allows users to probe kernel-space events without having to resort to instrument, recompile, install, and reboot the kernel.
+Most of the SystemTap scripts enumerated in Chapter 5, Useful SystemTap Scripts demonstrate system forensics and monitoring capabilities not natively available with other similar tools (such as top, oprofile, or ps). These scripts are provided to give readers extensive examples of the application of SystemTap, which in turn will educate them further on the capabilities they can employ when writing their own SystemTap scripts.
+Limitations
+The current iteration of SystemTap allows for a multitude of options when probing kernel-space events for a wide range of kernels. However, SystemTap's ability to probe user-space events is dependent on kernel support (the Utrace mechanism) that is unavailable in many kernels. Thus, only some kernel versions support user-space probing. At present, the developmental efforts of the SystemTap community are geared towards improving SystemTap's user-space probing capabilities.
 Using SystemTap
 This chapter instructs users how to install SystemTap, and provides an introduction on how to run SystemTap scripts.
 2.1. Installation and Setup
