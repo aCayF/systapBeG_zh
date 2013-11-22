@@ -1,0 +1,14 @@
+介绍
+SystemTap是一款跟踪和探测工具，它允许用户在细节方面研究和监测计算机系统（尤其是核心）的行为。它提供了和netstat， ps，top和iostat等指令类似的输出信息.但SystemTap提供了更多用来筛选和分析收集到的信息的选项。
+1.1 .文档目标
+SystemTap的基础架构能监视正在运行的Linux内核从而进行详细分析。这帮助管理员和开发人员识别出错误或性能问题的根本原因所在。
+如果没有SystemTap，监视正在运行的内核的行为需要一系列繁琐的输指令，重编译，安装，重启等操作。 SystemTap旨在省去这些步骤，让用户只需运行用户自己编写的systemtap脚本就能收集同样的信息。然而， SystemTap最初是为掌握有中级或高级内核知识的用户而设计的。这使得对那些只有有限的内核知识或内核经验的管理员和开发人员来说SystemTap就没那么有用了。此外，许多现有的SystemTap文档同样也只针对知识渊博，经验丰富的用户。这同样使得学习这门工具变得相当困难。
+为了降低这些门槛,SystemTap初学者指南正是以下列条目为目标进行编写：
+•为用户介绍SystemTap ，让他们熟悉它的架构，并提供安装步骤。
+•提供了SystemTap中预先写好的用于监测不同系统组件中具体行为的脚本，以及如何运行它们，并分析它们的输出结果。
+1.2 .SystemTap的性能
+•灵活性： SystemTap的架构允许用户开发简单的脚本来调查和监测各种各样的内核函数，系统调用，以及发生在内核空间的其他事件。  With this, SystemTap is not so much a tool as it is a system that allows you to develop your own kernel-specific forensic and monitoring tools.
+•易于使用性：正如前面提到的， SystemTap允许用户探测内核空间的事件，而无需借助于输指令，重编译，安装，并重启内核。
+在第5章(实用systemtap脚本)中列举的SystemTap脚本演示了系统取证和监控能力，而其他类似工具本身就不提供（如top， oprofile的，或PS ） 。这些脚本提供了读者大量的SystemTap应用实例，反过来也进一步强化了他们写出自己SystemTap脚本的能力。
+限制
+当前迭代的SystemTap允许用户使用各种选项来探测很大范围内的内核空间事件。然而， SystemTap的探测用户空间事件的能力有赖于内核的支持（ utrace机制），而该机制在许多内核里并未得到支持。因此，只有一定量的内核版本才支持用户空间探测。目前， SystemTap社区正致力于改善SystemTap用户空间探测的能力。
